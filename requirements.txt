@@ -1,0 +1,10 @@
+# eGauge Energy Analysis Toolkit - Dependencies
+
+# Required
+python-dotenv>=1.0.0
+
+# Optional - for visualization (charts)
+matplotlib>=3.7.0
+
+# Optional - for email (if using Gmail/OAuth)
+# google-auth>=2.0.0
