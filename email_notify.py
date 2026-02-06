@@ -219,7 +219,9 @@ def send_weekly_report(
     days: int = 7,
     previous_week: Optional[dict] = None,
     historical_avg: Optional[dict] = None,
-    daily_data: Optional[list] = None
+    daily_data: Optional[list] = None,
+    solar_system: Optional[dict] = None,
+    solar_register_stats: Optional[dict] = None,
 ) -> bool:
     """
     Send the weekly energy report with HTML formatting.
@@ -248,7 +250,9 @@ def send_weekly_report(
                 days,
                 previous_week,
                 historical_avg,
-                daily_data
+                daily_data,
+                solar_system=solar_system,
+                solar_register_stats=solar_register_stats,
             )
         except ImportError:
             print("Warning: Could not import html_report module. Sending plain text.")

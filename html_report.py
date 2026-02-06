@@ -85,14 +85,22 @@ def generate_html_report(
     days: int,
     previous_week: Optional[Dict] = None,
     historical_avg: Optional[Dict] = None,
-    daily_data: Optional[List[Dict]] = None
+    daily_data: Optional[List[Dict]] = None,
+    solar_system: Optional[Dict] = None,
+    solar_register_stats: Optional[Dict] = None,
 ) -> str:
     """Generate a complete HTML email report."""
 
-    # Sort registers by cost
+    # Sort registers by cost (grid cost when solar available, else full rate)
+    def _sort_cost(item):
+        reg_name, stats = item
+        if solar_register_stats and reg_name in solar_register_stats:
+            return solar_register_stats[reg_name].get('grid_cost', stats['total_cost'])
+        return stats['total_cost']
+
     sorted_registers = sorted(
         register_stats.items(),
-        key=lambda x: x[1]['total_cost'],
+        key=_sort_cost,
         reverse=True
     )
 
@@ -100,6 +108,176 @@ def generate_html_report(
     total_cost = sum(s['total_cost'] for s in register_stats.values())
     avg_daily_kwh = total_kwh / days
     avg_daily_cost = total_cost / days
+
+    # Energy grade
+    grade_score = 70
+    total_peak_kwh_all = sum(s['by_tou']['peak']['kwh'] for s in register_stats.values())
+    peak_usage_pct = (total_peak_kwh_all / total_kwh * 100) if total_kwh > 0 else 0
+    if peak_usage_pct < 15:
+        grade_score += 15
+    elif peak_usage_pct < 25:
+        grade_score += 5
+    elif peak_usage_pct > 35:
+        grade_score -= 15
+    elif peak_usage_pct > 25:
+        grade_score -= 5
+    if solar_system:
+        ss_consumption = solar_system.get('total_consumption_kwh', 0)
+        ss_grid = solar_system.get('total_grid_import_kwh', 0)
+        if ss_consumption > 0:
+            self_suff = (ss_consumption - ss_grid) / ss_consumption * 100
+            if self_suff > 50:
+                grade_score += 20
+            elif self_suff > 30:
+                grade_score += 10
+            elif self_suff > 15:
+                grade_score += 5
+    if grade_score >= 90:
+        grade_letter, grade_color = 'A', COLORS['success']
+    elif grade_score >= 80:
+        grade_letter, grade_color = 'B', COLORS['primary']
+    elif grade_score >= 65:
+        grade_letter, grade_color = 'C', COLORS['warning']
+    else:
+        grade_letter, grade_color = 'D', COLORS['danger']
+
+    grade_html = f'<span style="background: {grade_color}; color: white; padding: 4px 10px; border-radius: 4px; font-size: 16px; font-weight: 800; margin-left: 8px;">{grade_letter}</span>'
+
+    # Solar + Battery + Source Mix section
+    solar_html = ""
+    sol_self_suff = 0
+    sol_savings = 0
+    sol_net = total_cost
+    sol_consumption = total_kwh
+    sol_grid_in = total_kwh
+    sol_kwh = 0
+    sol_battery_kwh = 0
+    if solar_system:
+        sol_kwh = solar_system.get('total_solar_kwh', 0)
+        sol_grid_in = solar_system.get('total_grid_import_kwh', 0)
+        sol_grid_out = solar_system.get('total_grid_export_kwh', 0)
+        sol_consumption = solar_system.get('total_consumption_kwh', 0)
+        sol_grid_cost = solar_system.get('total_grid_cost', 0)
+        sol_export_cr = solar_system.get('total_export_credit', 0)
+        sol_net = solar_system.get('net_cost', 0)
+        sol_self_suff = ((sol_consumption - sol_grid_in) / sol_consumption * 100) if sol_consumption > 0 else 0
+        # Use actual HA battery discharge data
+        sol_battery_kwh = solar_system.get('total_battery_discharge_kwh', 0)
+        sol_savings = total_cost - sol_net
+        suff_color = COLORS['success'] if sol_self_suff > 40 else COLORS['warning'] if sol_self_suff > 20 else COLORS['muted']
+
+        # Source mix percentages
+        total_supply = sol_kwh + sol_grid_in + sol_battery_kwh
+        solar_pct = (sol_kwh / total_supply * 100) if total_supply > 0 else 0
+        battery_pct = (sol_battery_kwh / total_supply * 100) if total_supply > 0 else 0
+        grid_pct = (sol_grid_in / total_supply * 100) if total_supply > 0 else 100
+
+        solar_html = f"""
+        <!-- Source Mix -->
+        <div style="margin: 0 20px 16px;">
+            <h3 style="margin: 0 0 10px; color: {COLORS['dark']}; font-size: 14px;">Energy Source Mix</h3>
+            <div style="display: flex; height: 28px; border-radius: 6px; overflow: hidden; margin-bottom: 6px;">
+                <div style="width: {solar_pct}%; background: #eab308; min-width: {1 if solar_pct > 0 else 0}px;" title="Solar"></div>
+                <div style="width: {battery_pct}%; background: {COLORS['success']}; min-width: {1 if battery_pct > 0 else 0}px;" title="Battery"></div>
+                <div style="width: {grid_pct}%; background: {COLORS['danger']}; min-width: {1 if grid_pct > 0 else 0}px;" title="Grid"></div>
+            </div>
+            <table style="width: 100%; font-size: 12px;">
+                <tr>
+                    <td>
+                        <span style="display: inline-block; width: 10px; height: 10px; background: #eab308; border-radius: 2px; margin-right: 4px;"></span>
+                        Solar {solar_pct:.0f}%
+                        <span style="color: {COLORS['muted']};">({sol_kwh:.0f} kWh)</span>
+                    </td>
+                    <td style="text-align: center;">
+                        <span style="display: inline-block; width: 10px; height: 10px; background: {COLORS['success']}; border-radius: 2px; margin-right: 4px;"></span>
+                        Battery {battery_pct:.0f}%
+                        <span style="color: {COLORS['muted']};">({sol_battery_kwh:.0f} kWh)</span>
+                    </td>
+                    <td style="text-align: right;">
+                        <span style="display: inline-block; width: 10px; height: 10px; background: {COLORS['danger']}; border-radius: 2px; margin-right: 4px;"></span>
+                        Grid {grid_pct:.0f}%
+                        <span style="color: {COLORS['muted']};">({sol_grid_in:.0f} kWh)</span>
+                    </td>
+                </tr>
+            </table>
+        </div>
+
+        <!-- Solar & Battery Details -->
+        <div style="margin: 0 20px 16px; background: linear-gradient(135deg, #fef9c3, #fde68a); border-radius: 8px; padding: 16px;">
+            <table style="width: 100%;">
+                <tr>
+                    <td style="text-align: center; padding: 6px;">
+                        <div style="font-size: 22px; font-weight: 700; color: {suff_color};">{sol_self_suff:.0f}%</div>
+                        <div style="font-size: 11px; color: {COLORS['muted']};">Self-Sufficiency</div>
+                    </td>
+                    <td style="text-align: center; padding: 6px;">
+                        <div style="font-size: 22px; font-weight: 700; color: {COLORS['success']};">{format_currency(sol_savings)}</div>
+                        <div style="font-size: 11px; color: {COLORS['muted']};">Solar + Battery Savings</div>
+                    </td>
+                    <td style="text-align: center; padding: 6px;">
+                        <div style="font-size: 22px; font-weight: 700; color: {COLORS['dark']};">{format_currency(sol_export_cr)}</div>
+                        <div style="font-size: 11px; color: {COLORS['muted']};">Export Credits</div>
+                    </td>
+                </tr>
+            </table>
+            <div style="margin-top: 8px; font-size: 12px; color: {COLORS['muted']}; text-align: center;">
+                Grid cost: {format_currency(sol_grid_cost)} &middot; Export: {sol_grid_out:.0f} kWh &middot; Net: {format_currency(sol_net)}
+                &middot; Est. monthly savings: ~{format_currency(sol_savings / days * 30)}
+            </div>
+        </div>
+        """
+
+    # Optimization opportunities
+    opps_html = ""
+    opps = []
+    for register, stats in sorted_registers:
+        peak_pct_val = stats['by_tou']['peak']['percent']
+        peak_cost_val = stats['by_tou']['peak']['cost']
+        if peak_pct_val > 20 and peak_cost_val > 1.0:
+            opp_name = register.replace(' [kWh]', '')
+            peak_kwh_val = stats['by_tou']['peak']['kwh']
+            peak_rate = get_rate(datetime.now(), 'peak')
+            offpeak_rate = get_rate(datetime.now(), 'off_peak')
+            potential = peak_kwh_val * (peak_rate - offpeak_rate)
+            grid_factor = 1.0
+            if solar_register_stats and register in solar_register_stats:
+                sr = solar_register_stats[register]
+                if sr['total_kwh'] > 0:
+                    grid_factor = sr['grid_kwh'] / sr['total_kwh']
+            adjusted = potential * grid_factor
+            if adjusted > 0.50:
+                opps.append({'name': opp_name, 'peak_pct': peak_pct_val, 'savings': adjusted, 'grid_factor': grid_factor})
+    opps.sort(key=lambda x: x['savings'], reverse=True)
+
+    if opps:
+        opp_items = ""
+        for opp in opps[:5]:
+            coverage = ''
+            if opp['grid_factor'] < 0.5:
+                coverage = f' <span style="color: {COLORS["success"]}; font-size: 11px;">(mostly solar-powered)</span>'
+            opp_items += f"""
+            <div style="padding: 10px; border-bottom: 1px solid {COLORS['light']};">
+                <table style="width: 100%;"><tr>
+                    <td>
+                        <div style="font-weight: 600; color: {COLORS['dark']};">{opp['name']}</div>
+                        <div style="font-size: 12px; color: {COLORS['muted']};">{opp['peak_pct']:.0f}% during peak{coverage}</div>
+                    </td>
+                    <td style="text-align: right;">
+                        <div style="font-weight: 700; color: {COLORS['success']};">{format_currency(opp['savings'])}/wk</div>
+                        <div style="font-size: 11px; color: {COLORS['muted']};">if shifted off-peak</div>
+                    </td>
+                </tr></table>
+            </div>
+            """
+
+        opps_html = f"""
+        <div style="margin: 24px 0;">
+            <h3 style="color: {COLORS['dark']}; margin-bottom: 12px;">&#128161; Savings Opportunities</h3>
+            <div style="border: 1px solid {COLORS['light']}; border-radius: 8px; overflow: hidden;">
+                {opp_items}
+            </div>
+        </div>
+        """
 
     # Calculate trends
     trend_html = ""
@@ -162,26 +340,43 @@ def generate_html_report(
         </div>
         """
 
-    # Build register rows
+    # Build register rows — show grid cost when solar data available
     register_rows = ""
+    display_total_cost = sol_net if solar_system else total_cost
     for i, (register, stats) in enumerate(sorted_registers):
         name = register.replace(' [kWh]', '')
 
         # Determine row color based on position
         row_bg = COLORS['white'] if i % 2 == 0 else COLORS['light']
 
+        # Use grid cost when solar data available
+        circuit_cost = stats['total_cost']
+        circuit_daily_cost = stats['avg_daily_cost']
+        if solar_register_stats and register in solar_register_stats:
+            sr = solar_register_stats[register]
+            circuit_cost = sr.get('grid_cost', stats['total_cost'])
+            circuit_daily_cost = circuit_cost / days
+
         # Calculate cost percentage of total
-        cost_pct = (stats['total_cost'] / total_cost * 100) if total_cost > 0 else 0
+        cost_pct = (circuit_cost / display_total_cost * 100) if display_total_cost > 0 else 0
 
-        # Get peak usage status
+        # Peak usage - show total peak % with battery indicator
         peak_pct = stats['by_tou']['peak']['percent']
-        off_peak_pct = stats['by_tou']['off_peak']['percent']
+        grid_peak_pct = peak_pct
+        battery_covers_peak = False
+        if solar_register_stats and register in solar_register_stats:
+            sr = solar_register_stats[register]
+            if sr.get('total_kwh', 0) > 0:
+                sr_peak_grid = sr.get('by_tou', {}).get('peak', {}).get('grid_kwh', 0)
+                grid_peak_pct = sr_peak_grid / sr['total_kwh'] * 100
+                if peak_pct > 1 and grid_peak_pct < peak_pct * 0.5:
+                    battery_covers_peak = True
 
-        # Color coding for peak usage
-        if peak_pct > HIGH_PEAK_USAGE_PERCENT:
+        # Color coding based on grid peak (what actually costs money)
+        if grid_peak_pct > HIGH_PEAK_USAGE_PERCENT:
             peak_color = COLORS['danger']
             peak_status = '⚠️'
-        elif peak_pct > HIGH_PEAK_USAGE_PERCENT * 0.7:
+        elif grid_peak_pct > HIGH_PEAK_USAGE_PERCENT * 0.7:
             peak_color = COLORS['warning']
             peak_status = ''
         else:
@@ -201,8 +396,8 @@ def generate_html_report(
                 </div>
             </td>
             <td style="padding: 12px; text-align: right; border-bottom: 1px solid {COLORS['light']};">
-                <div style="font-weight: 600;">{format_currency(stats['total_cost'])}</div>
-                <div style="font-size: 11px; color: {COLORS['muted']};">{cost_pct:.1f}% of total</div>
+                <div style="font-weight: 600;">{format_currency(circuit_cost)}</div>
+                <div style="font-size: 11px; color: {COLORS['muted']};">{format_currency(circuit_daily_cost)}/day</div>
             </td>
             <td style="padding: 12px; text-align: right; border-bottom: 1px solid {COLORS['light']};">
                 <div>{format_kwh(stats['total_kwh'])} kWh</div>
@@ -210,7 +405,7 @@ def generate_html_report(
             </td>
             <td style="padding: 12px; text-align: center; border-bottom: 1px solid {COLORS['light']};">
                 <span style="color: {peak_color}; font-weight: 600;">{peak_pct:.0f}%</span>
-                <span style="font-size: 12px;">{peak_status}</span>
+                {'<span style="color: ' + COLORS['success'] + '; font-size: 11px;" title="Battery covers peak">&#9889;</span>' if battery_covers_peak else '<span style="font-size: 12px;">' + peak_status + '</span>'}
             </td>
         </tr>
         """
@@ -231,22 +426,39 @@ def generate_html_report(
                 'message': f'{furnace_daily:.1f} kWh/day (threshold: {FURNACE_DAILY_THRESHOLD_KWH})',
             })
 
-    # Check peak usage
+    # Check peak usage (source-aware when solar data available)
     for register, stats in sorted_registers[:5]:
         peak_pct = stats['by_tou']['peak']['percent']
         if peak_pct > HIGH_PEAK_USAGE_PERCENT:
             name = register.replace(' [kWh]', '')
-            alerts.append({
-                'type': 'warning',
-                'icon': '⚡',
-                'title': f'{name}: High Peak Usage',
-                'message': f'{peak_pct:.1f}% during peak hours ({format_currency(stats["by_tou"]["peak"]["cost"])})',
-            })
+            # Check if solar/battery covers this circuit's peak usage
+            covered = False
+            if solar_register_stats and register in solar_register_stats:
+                sr = solar_register_stats[register]
+                sr_peak = sr.get('by_tou', {}).get('peak', {})
+                sr_peak_grid = sr_peak.get('grid_kwh', 0)
+                sr_peak_total = sr_peak.get('kwh', 0)
+                if sr_peak_total > 0 and sr_peak_grid / sr_peak_total < 0.4:
+                    covered = True
+            if covered:
+                alerts.append({
+                    'type': 'covered',
+                    'icon': '✓',
+                    'title': f'{name}: Peak Covered by Solar/Battery',
+                    'message': f'{peak_pct:.1f}% during peak — mostly solar/battery powered',
+                })
+            else:
+                alerts.append({
+                    'type': 'warning',
+                    'icon': '⚡',
+                    'title': f'{name}: High Peak Usage',
+                    'message': f'{peak_pct:.1f}% during peak hours ({format_currency(stats["by_tou"]["peak"]["cost"])})',
+                })
 
     if alerts:
         alerts_items = ""
         for alert in alerts:
-            bg_color = COLORS['danger'] if alert['type'] == 'danger' else COLORS['warning']
+            bg_color = COLORS['danger'] if alert['type'] == 'danger' else COLORS['success'] if alert['type'] == 'covered' else COLORS['warning']
             alerts_items += f"""
             <div style="background: {bg_color}15; border-left: 4px solid {bg_color}; padding: 12px; margin: 8px 0; border-radius: 0 4px 4px 0;">
                 <div style="font-weight: 600; color: {bg_color};">{alert['icon']} {alert['title']}</div>
@@ -338,7 +550,7 @@ def generate_html_report(
 
         <!-- Header -->
         <div style="background: linear-gradient(135deg, {COLORS['primary']}, #1d4ed8); color: white; padding: 24px; text-align: center;">
-            <h1 style="margin: 0; font-size: 24px;">⚡ Energy Report</h1>
+            <h1 style="margin: 0; font-size: 24px;">⚡ Energy Report {grade_html}</h1>
             <div style="opacity: 0.9; font-size: 14px; margin-top: 4px;">Last {days} Days</div>
             <div style="opacity: 0.7; font-size: 12px; margin-top: 2px;">{datetime.now().strftime('%B %d, %Y')}</div>
         </div>
@@ -346,16 +558,23 @@ def generate_html_report(
         <!-- Summary Cards -->
         <div style="padding: 20px; display: flex; gap: 12px;">
             <div style="flex: 1; background: {COLORS['light']}; border-radius: 8px; padding: 16px; text-align: center;">
-                <div style="font-size: 28px; font-weight: 700; color: {COLORS['primary']};">{format_currency(total_cost)}</div>
-                <div style="color: {COLORS['muted']}; font-size: 12px;">Total Cost</div>
-                <div style="font-size: 11px; color: {COLORS['muted']}; margin-top: 4px;">{format_currency(avg_daily_cost)}/day</div>
+                <div style="font-size: 28px; font-weight: 700; color: {COLORS['primary']};">{format_currency(sol_net)}</div>
+                <div style="color: {COLORS['muted']}; font-size: 12px;">{'Net Grid Cost' if solar_system else 'Total Cost'}</div>
+                <div style="font-size: 11px; color: {COLORS['muted']}; margin-top: 4px;">{format_currency(sol_net / days)}/day</div>
             </div>
             <div style="flex: 1; background: {COLORS['light']}; border-radius: 8px; padding: 16px; text-align: center;">
                 <div style="font-size: 28px; font-weight: 700; color: {COLORS['dark']};">{format_kwh(total_kwh)}</div>
                 <div style="color: {COLORS['muted']}; font-size: 12px;">Total kWh</div>
                 <div style="font-size: 11px; color: {COLORS['muted']}; margin-top: 4px;">{format_kwh(avg_daily_kwh)}/day</div>
             </div>
+            <div style="flex: 1; background: {COLORS['light']}; border-radius: 8px; padding: 16px; text-align: center;">
+                <div style="font-size: 28px; font-weight: 700; color: {'#eab308' if sol_self_suff > 20 else COLORS['muted']};">{sol_self_suff:.0f}%</div>
+                <div style="color: {COLORS['muted']}; font-size: 12px;">Self-Sufficiency</div>
+                <div style="font-size: 11px; color: {COLORS['muted']}; margin-top: 4px;">{format_kwh(sol_consumption - sol_grid_in)} non-grid</div>
+            </div>
         </div>
+
+        {solar_html}
 
         <!-- Trend Section -->
         <div style="padding: 0 20px;">
@@ -368,6 +587,11 @@ def generate_html_report(
             {alerts_html}
         </div>
 
+        <!-- Optimization Opportunities -->
+        <div style="padding: 0 20px;">
+            {opps_html}
+        </div>
+
         <!-- Register Table -->
         <div style="padding: 20px;">
             <h3 style="color: {COLORS['dark']}; margin-bottom: 12px;">Consumption by Circuit</h3>
@@ -375,7 +599,7 @@ def generate_html_report(
                 <thead>
                     <tr style="background: {COLORS['dark']}; color: white;">
                         <th style="padding: 10px; text-align: left; border-radius: 4px 0 0 0;">Circuit</th>
-                        <th style="padding: 10px; text-align: right;">Cost</th>
+                        <th style="padding: 10px; text-align: right;">{"Grid Cost" if solar_register_stats else "Cost"}</th>
                         <th style="padding: 10px; text-align: right;">Energy</th>
                         <th style="padding: 10px; text-align: center; border-radius: 0 4px 0 0;">Peak %</th>
                     </tr>
@@ -395,6 +619,7 @@ def generate_html_report(
         <div style="background: {COLORS['light']}; padding: 16px 20px; text-align: center; font-size: 11px; color: {COLORS['muted']};">
             <div>Generated by eGauge Energy Analysis Toolkit</div>
             <div style="margin-top: 4px;">Peak: 4-9pm | Part-Peak: 3-4pm, 9pm-12am | Off-Peak: 12am-3pm</div>
+            <div style="margin-top: 8px;"><a href="https://energy.zosia.io" style="color: {COLORS['primary']}; text-decoration: none;">View Live Dashboard &rarr;</a></div>
         </div>
     </div>
 </body>

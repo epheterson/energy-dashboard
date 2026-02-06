@@ -112,11 +112,13 @@ def calculate_hourly_consumption(data):
         prev = data[i-1]
         curr = data[i]
 
+        # Use prev (start of period) for TOU classification —
+        # consumption between two timestamps belongs to the start hour's TOU period
         hour_consumption = {
-            'datetime': curr['datetime'],
-            'date': curr['date'],
-            'hour': curr['hour'],
-            'tou_period': curr['tou_period'],
+            'datetime': prev['datetime'],
+            'date': prev['date'],
+            'hour': prev['hour'],
+            'tou_period': prev['tou_period'],
         }
 
         # Calculate consumption for each register
@@ -473,6 +475,10 @@ def main():
         '--html', type=str,
         help='Save HTML report to file (for preview in browser)'
     )
+    parser.add_argument(
+        '--solar', action='store_true',
+        help='Include solar/Powerwall data from Home Assistant'
+    )
 
     args = parser.parse_args()
 
@@ -546,6 +552,21 @@ def main():
         except ImportError:
             print("Warning: Could not import visualization module. Skipping charts.")
 
+    # Run solar integration if requested
+    solar_report = None
+    solar_system = None
+    solar_blended = None
+    if args.solar:
+        try:
+            from solar_integration import run_blended_report
+            solar_report, solar_system, solar_blended = run_blended_report(hourly_data, args.days)
+            if solar_report:
+                report = solar_report + "\n\n" + report
+        except ImportError as e:
+            print(f"Warning: Could not import solar_integration: {e}")
+        except Exception as e:
+            print(f"Warning: Solar integration failed: {e}")
+
     # Save or print report
     if args.output:
         # Ensure reports directory exists
@@ -568,7 +589,9 @@ def main():
                 args.days,
                 previous_week,
                 historical_avg,
-                daily_data
+                daily_data,
+                solar_system=solar_system,
+                solar_register_stats=dict(solar_blended) if solar_blended else None,
             )
             html_path = Path(args.html)
             html_path.parent.mkdir(parents=True, exist_ok=True)
@@ -591,7 +614,9 @@ def main():
                 days=args.days,
                 previous_week=previous_week,
                 historical_avg=historical_avg,
-                daily_data=daily_data
+                daily_data=daily_data,
+                solar_system=solar_system,
+                solar_register_stats=dict(solar_blended) if solar_blended else None,
             ):
                 print("Email sent successfully!")
         except ImportError:

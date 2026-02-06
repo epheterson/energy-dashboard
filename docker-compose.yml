@@ -1,0 +1,14 @@
+services:
+  energy-dashboard:
+    build: .
+    container_name: energy-dashboard
+    restart: unless-stopped
+    ports:
+      - "8400:8400"
+    env_file:
+      - .env
+    environment:
+      - TZ=America/Los_Angeles
+    volumes:
+      - ./data:/app/data
+      - ./config.yml:/app/config.yml:ro

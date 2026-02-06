@@ -1,0 +1,1801 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Energy Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<style>
+:root {
+  --bg: #0f1117;
+  --surface: #1a1d27;
+  --surface-2: #232733;
+  --border: #2d3140;
+  --text: #e4e6ed;
+  --text-muted: #8b8fa3;
+  --accent: #3b82f6;
+  --green: #22c55e;
+  --yellow: #eab308;
+  --red: #ef4444;
+  --orange: #f97316;
+  --solar: #facc15;
+  --grid-color: #ef4444;
+  --battery-color: #22c55e;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.5;
+  min-height: 100vh;
+}
+
+.container {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 20px;
+}
+
+header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 0;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 24px;
+}
+
+header h1 {
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.3px;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--green);
+  display: inline-block;
+  margin-right: 8px;
+  animation: pulse 2s infinite;
+}
+
+.status-dot.disconnected {
+  background: var(--red);
+  animation: none;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.tou-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+.tou-badge.off-peak { background: rgba(34,197,94,0.15); color: var(--green); }
+.tou-badge.part-peak { background: rgba(234,179,8,0.15); color: var(--yellow); }
+.tou-badge.peak { background: rgba(239,68,68,0.15); color: var(--red); }
+
+/* ---- Solar-disabled layout ---- */
+
+.no-solar .flow-card.solar,
+.no-solar .flow-card.battery,
+.no-solar #gridDir,
+.no-solar .stat-card[data-solar],
+.no-solar .source-legend,
+.no-solar .source-col,
+.no-solar [data-solar-toggle] { display: none !important; }
+
+.no-solar .power-flow { grid-template-columns: 1fr 1fr !important; }
+.no-solar .stats-row { grid-template-columns: 1fr 1fr !important; }
+.no-solar .insight-bar { display: none !important; }
+
+/* ---- Power Flow ---- */
+
+.power-flow {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.flow-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 20px;
+  text-align: center;
+}
+
+.flow-card .label {
+  font-size: 12px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 8px;
+}
+
+.flow-card .value {
+  font-size: 32px;
+  font-weight: 700;
+  letter-spacing: -1px;
+}
+
+.flow-card .unit {
+  font-size: 14px;
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
+.flow-card.solar .value { color: var(--solar); }
+.flow-card.battery .value { color: var(--battery-color); }
+.flow-card.home .value { color: var(--accent); }
+.flow-card.grid .value { color: var(--grid-color); }
+.flow-card.grid.exporting .value { color: var(--green); }
+
+.soc-bar {
+  width: 100%;
+  height: 6px;
+  background: var(--surface-2);
+  border-radius: 3px;
+  margin-top: 12px;
+  overflow: hidden;
+}
+
+.soc-bar .fill {
+  height: 100%;
+  border-radius: 3px;
+  background: var(--battery-color);
+  transition: width 1s ease;
+}
+
+/* ---- Stats Row ---- */
+
+.stats-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.stat-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px 20px;
+}
+
+.stat-card .label {
+  font-size: 12px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.stat-card .value {
+  font-size: 28px;
+  font-weight: 700;
+  margin-top: 4px;
+}
+
+.stat-card .sub {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+/* ---- Panels ---- */
+
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  margin-bottom: 24px;
+  overflow: hidden;
+}
+
+.panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.panel-header h2 {
+  font-size: 14px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.panel-body { padding: 20px; }
+
+.period-selector {
+  display: flex;
+  gap: 4px;
+  background: var(--surface-2);
+  border-radius: 8px;
+  padding: 2px;
+}
+
+.period-selector button {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  padding: 6px 14px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.period-selector button.active {
+  background: var(--accent);
+  color: white;
+}
+
+/* ---- Opportunities ---- */
+
+.opp-card {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 0;
+  border-bottom: 1px solid rgba(45,49,64,0.3);
+}
+
+.opp-card:last-child { border-bottom: none; }
+
+.opp-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+.opp-icon.warn { background: rgba(234,179,8,0.15); }
+.opp-icon.alert { background: rgba(239,68,68,0.15); }
+
+.opp-body { flex: 1; min-width: 0; }
+
+.opp-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.opp-detail {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 1px;
+}
+
+.opp-savings {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--green);
+  white-space: nowrap;
+}
+
+/* ---- Circuit Table ---- */
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+table.compact td { padding: 6px 10px; font-size: 13px; }
+table.compact th { padding: 6px 10px; }
+
+th {
+  text-align: left;
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  font-weight: 500;
+}
+
+th.sortable {
+  cursor: pointer;
+  user-select: none;
+}
+
+th.sortable:hover { color: var(--text); }
+
+.sort-arrow {
+  font-size: 10px;
+  opacity: 0.5;
+}
+
+th.active .sort-arrow { opacity: 1; color: var(--accent); }
+
+th.right, td.right { text-align: right; }
+
+td {
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(45,49,64,0.5);
+  font-size: 14px;
+}
+
+tr:last-child td { border-bottom: none; }
+
+.source-bar {
+  height: 6px;
+  background: var(--surface-2);
+  border-radius: 3px;
+  min-width: 80px;
+  display: flex;
+  overflow: hidden;
+}
+
+.source-bar .seg {
+  height: 100%;
+  transition: width 0.5s ease;
+}
+
+.source-bar .seg.solar { background: var(--solar); }
+.source-bar .seg.battery { background: var(--battery-color); }
+.source-bar .seg.grid { background: var(--grid-color); }
+
+.source-legend {
+  font-size: 11px;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.legend-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  display: inline-block;
+  margin-left: 8px;
+}
+
+.legend-dot:first-child { margin-left: 0; }
+
+.mono {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 13px;
+}
+
+/* ---- Charts ---- */
+
+.chart-container {
+  position: relative;
+  height: 280px;
+}
+
+/* ---- Drilldown Modal ---- */
+
+.modal-overlay {
+  display: none;
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.6);
+  z-index: 100;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(4px);
+}
+
+.modal-overlay.show { display: flex; }
+
+.modal {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  width: 90%;
+  max-width: 560px;
+  max-height: 80vh;
+  overflow-y: auto;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.modal-header h3 {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.modal-close {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 20px;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 6px;
+}
+
+.modal-close:hover { background: var(--surface-2); color: var(--text); }
+
+.modal-body { padding: 16px 20px; }
+
+.modal-stats {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.modal-stat {
+  flex: 1;
+  background: var(--surface-2);
+  border-radius: 8px;
+  padding: 12px;
+  text-align: center;
+}
+
+.modal-stat .val {
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.modal-stat .lbl {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-top: 2px;
+}
+
+.drill-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(45,49,64,0.3);
+}
+
+.drill-bar-row:last-child { border-bottom: none; }
+
+.drill-name {
+  width: 140px;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.drill-bar {
+  flex: 1;
+  height: 8px;
+  background: var(--surface-2);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.drill-bar .fill {
+  height: 100%;
+  border-radius: 4px;
+  background: var(--accent);
+  transition: width 0.3s ease;
+}
+
+.drill-val {
+  width: 100px;
+  text-align: right;
+  font-size: 13px;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  color: var(--text-muted);
+}
+
+/* ---- State Badge ---- */
+
+.state-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+}
+
+.state-badge.optimal { background: rgba(34,197,94,0.12); color: var(--green); }
+.state-badge.good { background: rgba(59,130,246,0.12); color: var(--accent); }
+.state-badge.caution { background: rgba(234,179,8,0.12); color: var(--yellow); }
+.state-badge.bad { background: rgba(239,68,68,0.12); color: var(--red); }
+
+/* ---- Insight Bar ---- */
+
+.insight-bar {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 16px;
+  margin-bottom: 16px;
+  font-size: 13px;
+  display: none;
+  align-items: center;
+  gap: 8px;
+}
+
+.insight-bar.show { display: flex; }
+
+.insight-icon { font-size: 16px; flex-shrink: 0; }
+.insight-text { flex: 1; }
+.insight-text strong { font-weight: 600; }
+
+/* ---- Loading ---- */
+
+.panel-loading {
+  text-align: center;
+  padding: 40px 20px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.spinner {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  margin-right: 8px;
+  vertical-align: middle;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ---- Responsive ---- */
+
+@media (max-width: 768px) {
+  .power-flow { grid-template-columns: 1fr 1fr; }
+  .stats-row { grid-template-columns: 1fr 1fr; }
+  .flow-card .value { font-size: 24px; }
+  .state-badge { display: none; }
+}
+</style>
+</head>
+<body>
+<div class="container">
+
+<header>
+  <div style="display:flex;align-items:center;gap:12px">
+    <h1>Energy</h1>
+    <span class="status-dot" id="statusDot"></span>
+    <span id="touBadge" class="tou-badge off-peak">OFF-PEAK $0.40</span>
+    <span id="stateBadge" class="state-badge good">--</span>
+  </div>
+  <div style="font-size:13px;color:var(--text-muted)" id="lastUpdate">Connecting...</div>
+</header>
+
+<!-- Live Power Flow -->
+<div class="power-flow">
+  <div class="flow-card solar">
+    <div class="label">Solar</div>
+    <div class="value"><span id="solarW">--</span> <span class="unit">W</span></div>
+  </div>
+  <div class="flow-card battery" id="batteryCard">
+    <div class="label">Battery</div>
+    <div class="value"><span id="batteryW">--</span> <span class="unit">W</span></div>
+    <div class="soc-bar"><div class="fill" id="socFill" style="width:0%"></div></div>
+    <div style="font-size:12px;color:var(--text-muted);margin-top:4px"><span id="socPct">--</span>%</div>
+  </div>
+  <div class="flow-card home">
+    <div class="label">Home</div>
+    <div class="value"><span id="homeW">--</span> <span class="unit">W</span></div>
+  </div>
+  <div class="flow-card grid" id="gridCard">
+    <div class="label">Grid</div>
+    <div class="value"><span id="gridW">--</span> <span class="unit">W</span></div>
+    <div style="font-size:12px;color:var(--text-muted);margin-top:4px" id="gridDir">--</div>
+  </div>
+</div>
+
+<!-- Stats -->
+<div class="stats-row">
+  <div class="stat-card">
+    <div class="label">Today's Cost</div>
+    <div class="value" id="todayCost">--</div>
+    <div class="sub" id="todayCostSub"></div>
+  </div>
+  <div class="stat-card">
+    <div class="label">Today's Usage</div>
+    <div class="value" id="todayKwh">--</div>
+    <div class="sub">kWh</div>
+  </div>
+  <div class="stat-card" data-solar>
+    <div class="label">Solar + Battery Savings</div>
+    <div class="value" style="color:var(--green)" id="solarSavings">--</div>
+    <div class="sub" id="solarSavingsSub">this week</div>
+  </div>
+  <div class="stat-card" data-solar>
+    <div class="label">Self-Sufficiency</div>
+    <div class="value" style="color:var(--solar)" id="selfSuff">--</div>
+    <div class="sub" id="selfSuffSub">non-grid</div>
+  </div>
+</div>
+
+<!-- Insight Bar -->
+<div class="insight-bar" id="insightBar">
+  <span class="insight-icon" id="insightIcon"></span>
+  <span class="insight-text" id="insightText"></span>
+</div>
+
+<!-- Optimization Opportunities -->
+<div class="panel" id="opportunitiesPanel" style="display:none">
+  <div class="panel-header">
+    <h2>Optimization Opportunities</h2>
+    <span style="font-size:12px;color:var(--text-muted)" id="oppSummary"></span>
+  </div>
+  <div class="panel-body" style="padding:12px 20px" id="opportunitiesList"></div>
+</div>
+
+<!-- Circuits Table -->
+<div class="panel">
+  <div class="panel-header">
+    <h2>Circuits — Live</h2>
+    <div style="display:flex;align-items:center;gap:8px">
+      <span class="source-legend"><span class="legend-dot" style="background:var(--solar)"></span>Solar <span class="legend-dot" style="background:var(--battery-color)"></span>Battery <span class="legend-dot" style="background:var(--grid-color)"></span>Grid</span>
+    </div>
+  </div>
+  <div class="panel-body" style="padding:0">
+    <table class="compact">
+      <thead>
+        <tr>
+          <th class="sortable" data-sort="name" onclick="sortCircuits('name')">Circuit <span class="sort-arrow"></span></th>
+          <th class="right sortable active" data-sort="watts" onclick="sortCircuits('watts')">Now <span class="sort-arrow">▼</span></th>
+          <th class="right sortable" data-sort="kwh" onclick="sortCircuits('kwh')">Today <span class="sort-arrow"></span></th>
+          <th class="right sortable" data-sort="cost" onclick="sortCircuits('cost')">Cost <span class="sort-arrow"></span></th>
+          <th style="width:120px" class="source-col">Source</th>
+        </tr>
+      </thead>
+      <tbody id="circuitTable"></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Hourly Cost Chart -->
+<div class="panel">
+  <div class="panel-header">
+    <h2>Today — Hourly</h2>
+    <div class="period-selector" data-solar-toggle>
+      <button class="active" onclick="setHourlyView('cost', this)">Cost</button>
+      <button onclick="setHourlyView('source', this)">Source</button>
+    </div>
+  </div>
+  <div class="panel-body">
+    <div class="chart-container">
+      <canvas id="hourlyChart"></canvas>
+    </div>
+  </div>
+</div>
+
+<!-- Historical -->
+<div class="panel">
+  <div class="panel-header">
+    <h2>Historical</h2>
+    <div style="display:flex;gap:8px">
+      <div class="period-selector" data-solar-toggle>
+        <button class="active" onclick="setHistView('cost', this)">Cost</button>
+        <button onclick="setHistView('source', this)">Source</button>
+      </div>
+      <div class="period-selector" id="histDaysSelector">
+        <button class="active" onclick="loadHistory(7, this)">7d</button>
+        <button onclick="loadHistory(14, this)">14d</button>
+        <button onclick="loadHistory(30, this)">30d</button>
+      </div>
+    </div>
+  </div>
+  <div class="panel-body">
+    <div class="chart-container">
+      <canvas id="historyChart"></canvas>
+    </div>
+  </div>
+</div>
+
+<!-- Hourly Drilldown Modal -->
+<div class="modal-overlay" id="drilldownModal">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 id="drilldownTitle">--</h3>
+      <button class="modal-close" onclick="closeDrilldown()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="modal-stats">
+        <div class="modal-stat">
+          <div class="val" id="drillCost">--</div>
+          <div class="lbl">Cost</div>
+        </div>
+        <div class="modal-stat">
+          <div class="val" id="drillKwh">--</div>
+          <div class="lbl">kWh</div>
+        </div>
+        <div class="modal-stat">
+          <div class="val" id="drillPeriod">--</div>
+          <div class="lbl">TOU Period</div>
+        </div>
+      </div>
+      <div id="drillCircuits"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Historical Circuits -->
+<div class="panel">
+  <div class="panel-header">
+    <h2>Weekly Circuit Breakdown</h2>
+    <div id="histSummary" style="font-size:13px;color:var(--text-muted)"></div>
+  </div>
+  <div class="panel-body" style="padding:0">
+    <table id="histCircuitTableWrap">
+      <thead>
+        <tr>
+          <th class="sortable" data-sort="name" onclick="sortHistCircuits('name')">Circuit <span class="sort-arrow"></span></th>
+          <th class="right sortable" data-sort="kwh" onclick="sortHistCircuits('kwh')">kWh <span class="sort-arrow"></span></th>
+          <th class="right sortable active" data-sort="cost" onclick="sortHistCircuits('cost')" id="histCostHeader">Cost <span class="sort-arrow">▼</span></th>
+          <th class="right sortable" data-sort="daily_cost" onclick="sortHistCircuits('daily_cost')">$/day <span class="sort-arrow"></span></th>
+          <th class="right sortable" data-sort="peak_pct" onclick="sortHistCircuits('peak_pct')" id="peakPctHeader">Peak % <span class="sort-arrow"></span></th>
+        </tr>
+      </thead>
+      <tbody id="histCircuitTable"></tbody>
+    </table>
+  </div>
+</div>
+
+</div>
+
+<script>
+// ==========================================
+// WebSocket — Live Data
+// ==========================================
+
+function localDateStr(d) {
+  d = d || new Date();
+  return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+}
+
+let ws;
+let reconnectTimer;
+const wsUrl = `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/api/live`;
+
+function connect() {
+  ws = new WebSocket(wsUrl);
+  ws.onopen = () => {
+    document.getElementById('statusDot').classList.remove('disconnected');
+    document.getElementById('lastUpdate').textContent = 'Connected';
+  };
+  ws.onmessage = (e) => {
+    const d = JSON.parse(e.data);
+    updateLive(d);
+  };
+  ws.onclose = () => {
+    document.getElementById('statusDot').classList.add('disconnected');
+    document.getElementById('lastUpdate').textContent = 'Reconnecting...';
+    reconnectTimer = setTimeout(connect, 3000);
+  };
+  ws.onerror = () => ws.close();
+}
+
+function updateLive(d) {
+  // TOU badge
+  const badge = document.getElementById('touBadge');
+  const periodLabel = d.tou_period.replace('_', '-').toUpperCase();
+  badge.textContent = `${periodLabel} $${d.tou_rate.toFixed(2)}`;
+  badge.className = 'tou-badge ' + d.tou_period.replace('_', '-');
+
+  // Timestamp
+  const t = new Date(d.timestamp);
+  document.getElementById('lastUpdate').textContent = t.toLocaleTimeString();
+
+  // Power flow cards (auto-scale W/kW)
+  const setSmart = (id, watts) => {
+    const el = document.getElementById(id);
+    const unit = el.closest('.flow-card').querySelector('.unit');
+    if (Math.abs(watts) >= 1000) {
+      el.textContent = (watts / 1000).toFixed(1);
+      unit.textContent = 'kW';
+    } else {
+      el.textContent = fmt(watts);
+      unit.textContent = 'W';
+    }
+  };
+  setSmart('solarW', d.solar_w);
+  setSmart('batteryW', Math.abs(d.battery_w));
+  setSmart('homeW', d.home_w);
+  setSmart('gridW', Math.abs(d.grid_w));
+  document.getElementById('socPct').textContent = d.battery_soc.toFixed(0);
+  document.getElementById('socFill').style.width = d.battery_soc + '%';
+
+  // Battery direction (positive = discharging to home, negative = charging)
+  const batCard = document.getElementById('batteryCard');
+  batCard.querySelector('.label').textContent = d.battery_w > 50 ? 'Battery ↓ Discharging' : d.battery_w < -50 ? 'Battery ↑ Charging' : 'Battery — Idle';
+
+  // Grid direction
+  const gridCard = document.getElementById('gridCard');
+  const gridDir = document.getElementById('gridDir');
+  if (d.grid_w > 0) {
+    gridDir.textContent = '← Importing';
+    gridCard.classList.remove('exporting');
+  } else if (d.grid_w < 0) {
+    gridDir.textContent = '→ Exporting';
+    gridCard.classList.add('exporting');
+  } else {
+    gridDir.textContent = '— Idle';
+    gridCard.classList.remove('exporting');
+  }
+
+  // Today stats — only update cost from live WS if we don't have solar-adjusted data yet
+  if (!window._todayGridCost) {
+    document.getElementById('todayCost').textContent = '$' + d.today_cost.toFixed(2);
+  }
+  document.getElementById('todayKwh').textContent = d.today_kwh.toFixed(1);
+
+  // System state
+  updateSystemState(d);
+
+  // Circuits table (with source mix for bar coloring)
+  updateCircuitTable(d.circuits, d.source_mix);
+}
+
+function updateSystemState(d) {
+  const badge = document.getElementById('stateBadge');
+  const mix = d.source_mix || { solar: 0, battery: 0, grid: 0 };
+  const period = d.tou_period;
+  let state, cls, label;
+
+  if (d.grid_w < -50) {
+    state = 'exporting'; cls = 'optimal'; label = 'Exporting to Grid';
+  } else if (mix.solar > 80) {
+    state = 'solar'; cls = 'optimal'; label = 'Solar Powered';
+  } else if (mix.solar > 20 && mix.battery > 20 && mix.grid < 20) {
+    state = 'solar_battery'; cls = 'optimal'; label = 'Solar + Battery';
+  } else if (mix.battery > 80) {
+    state = 'battery'; cls = 'optimal'; label = 'Battery Powered';
+  } else if (mix.battery > 20 && mix.grid > 20) {
+    state = 'battery_grid'; cls = period === 'peak' ? 'caution' : 'good'; label = 'Battery + Grid';
+  } else if (mix.grid > 80) {
+    if (period === 'peak') { state = 'grid_peak'; cls = 'bad'; label = 'Grid Peak!'; }
+    else if (period === 'part_peak') { state = 'grid_pp'; cls = 'caution'; label = 'Grid Part-Peak'; }
+    else { state = 'grid_op'; cls = 'good'; label = 'Grid Off-Peak'; }
+  } else if (d.battery_w < -50) {
+    state = 'charging'; cls = 'good'; label = 'Battery Charging';
+  } else {
+    state = 'mixed'; cls = 'good'; label = 'Mixed Sources';
+  }
+
+  badge.textContent = label;
+  badge.className = 'state-badge ' + cls;
+
+  // Update insight bar with daily context
+  updateInsight(d, mix);
+}
+
+function updateInsight(d, mix) {
+  const bar = document.getElementById('insightBar');
+  const icon = document.getElementById('insightIcon');
+  const text = document.getElementById('insightText');
+
+  let msg = null;
+  if (mix.battery >= 99 && mix.grid < 1 && mix.solar < 1) {
+    msg = { ico: '\u26A1', txt: '<strong>100% battery powered</strong> right now. Zero grid cost.' };
+  } else if (mix.solar > 50) {
+    const pct = Math.round(mix.solar + mix.battery);
+    msg = { ico: '\u2600\uFE0F', txt: `<strong>${pct}% renewable</strong> right now. Solar + battery covering most of your load.` };
+  } else if (mix.grid > 80 && d.tou_period === 'peak') {
+    msg = { ico: '\u26A0', txt: `<strong>Heavy grid draw during peak</strong> ($${d.tou_rate.toFixed(2)}/kWh). Defer large loads if possible.` };
+  } else if (d.battery_soc < 15) {
+    msg = { ico: '\uD83D\uDD0B', txt: `<strong>Battery low (${d.battery_soc.toFixed(0)}%)</strong>. Running on grid until solar recharges.` };
+  }
+
+  if (msg) {
+    icon.textContent = msg.ico;
+    text.innerHTML = msg.txt;
+    bar.classList.add('show');
+  } else {
+    bar.classList.remove('show');
+  }
+}
+
+// Circuit sorting state
+let circuitSortKey = 'watts';
+let circuitSortDesc = true;
+let lastCircuits = [];
+let lastSourceMix = { solar: 0, battery: 0, grid: 0 };
+
+function updateCircuitTable(circuits, sourceMix) {
+  lastCircuits = circuits;
+  if (sourceMix) lastSourceMix = sourceMix;
+  renderCircuitTable();
+}
+
+function sortCircuits(key) {
+  if (circuitSortKey === key) {
+    circuitSortDesc = !circuitSortDesc;
+  } else {
+    circuitSortKey = key;
+    circuitSortDesc = key !== 'name';
+  }
+  // Update all header arrows
+  document.querySelectorAll('.sortable').forEach(th => {
+    const isActive = th.dataset.sort === key;
+    th.classList.toggle('active', isActive);
+    const arrow = th.querySelector('.sort-arrow');
+    if (arrow) arrow.textContent = isActive ? (circuitSortDesc ? '\u25BC' : '\u25B2') : '';
+  });
+  renderCircuitTable();
+}
+
+function renderCircuitTable() {
+  const tbody = document.getElementById('circuitTable');
+  const todayCircuits = window._todayCircuits || {};
+  const mix = lastSourceMix;
+
+  // Build merged data
+  let rows = lastCircuits.map(c => {
+    const tc = todayCircuits[c.name] || { kwh: 0, cost: 0 };
+    return { ...c, todayKwh: tc.kwh, todayCost: tc.cost };
+  });
+
+  // Sort
+  rows.sort((a, b) => {
+    let va, vb;
+    switch (circuitSortKey) {
+      case 'name': va = a.name.toLowerCase(); vb = b.name.toLowerCase(); break;
+      case 'watts': va = a.watts; vb = b.watts; break;
+      case 'kwh': va = a.todayKwh; vb = b.todayKwh; break;
+      case 'cost': va = a.todayCost; vb = b.todayCost; break;
+      default: va = a.watts; vb = b.watts;
+    }
+    if (va < vb) return circuitSortDesc ? 1 : -1;
+    if (va > vb) return circuitSortDesc ? -1 : 1;
+    return 0;
+  });
+
+  tbody.innerHTML = rows.map(c => {
+    // Source bar: fixed-width, shows current source mix proportions
+    const s = mix.solar, b = mix.battery, g = mix.grid;
+    return `<tr>
+      <td>${c.name}</td>
+      <td class="right mono">${fmtW(c.watts)}</td>
+      <td class="right mono">${fmtWh(c.todayKwh)}</td>
+      <td class="right mono">$${c.todayCost.toFixed(2)}</td>
+      <td class="source-col"><div class="source-bar">
+        ${s > 0.5 ? `<div class="seg solar" style="width:${s}%"></div>` : ''}
+        ${b > 0.5 ? `<div class="seg battery" style="width:${b}%"></div>` : ''}
+        ${g > 0.5 ? `<div class="seg grid" style="width:${g}%"></div>` : ''}
+      </div></td>
+    </tr>`;
+  }).join('');
+}
+
+function fmt(n) {
+  if (n === undefined || n === null) return '--';
+  return Math.round(n).toLocaleString();
+}
+
+function fmtW(watts) {
+  if (watts === undefined || watts === null) return '--';
+  if (Math.abs(watts) >= 1000) return (watts / 1000).toFixed(1) + ' kW';
+  return Math.round(watts) + ' W';
+}
+
+function fmtWh(kwh) {
+  if (kwh === undefined || kwh === null) return '--';
+  if (Math.abs(kwh) < 0.1 && kwh !== 0) return Math.round(kwh * 1000) + ' Wh';
+  return kwh.toFixed(1) + ' kWh';
+}
+
+// ==========================================
+// REST — Today's Data
+// ==========================================
+
+async function loadToday() {
+  try {
+    const r = await fetch('/api/today');
+    const d = await r.json();
+    if (d.error) return;
+
+    // Store full-rate cost; will be updated by loadSolar with grid-only cost
+    window._todayFullRateCost = d.total_cost;
+    window._todayHourlyData = d.hourly;
+
+    // Show full-rate cost initially (solar data may update this)
+    if (!window._todayGridCost) {
+      document.getElementById('todayCost').textContent = '$' + d.total_cost.toFixed(2);
+      document.getElementById('todayCostSub').textContent = window._solarEnabled ? 'full rate (loading solar...)' : 'full rate';
+    } else {
+      // Solar data already loaded, recalculate with fresh hourly data
+      applyTodaySolarAdjustment();
+    }
+    document.getElementById('todayKwh').textContent = d.total_kwh.toFixed(1);
+
+    // Cache circuits for live table merge
+    window._todayCircuits = {};
+    d.circuits.forEach(c => { window._todayCircuits[c.name] = c; });
+
+    // Hourly chart
+    updateHourlyChart(d.hourly);
+  } catch (e) {
+    console.error('loadToday error:', e);
+  }
+}
+
+function applyTodaySolarAdjustment() {
+  // Use per-hour solar data to compute today's actual grid cost
+  const solar = window._todaySolarData;
+  const hourly = window._todayHourlyData;
+  if (!solar || !hourly) return;
+
+  const today = localDateStr();
+  const solarByHour = {};
+  if (solar.hourly) {
+    solar.hourly.forEach(h => {
+      if (h.date === today) solarByHour[h.hour] = h;
+    });
+  }
+
+  let gridCost = 0;
+  let fullCost = 0;
+  for (const h of hourly) {
+    fullCost += h.cost;
+    const sh = solarByHour[h.hour];
+    if (sh) {
+      // Use actual HA battery discharge sensor
+      const batteryKwh = sh.battery_discharge_kwh || 0;
+      const totalSupply = sh.solar_kwh + sh.grid_import_kwh + batteryKwh;
+      const gridFrac = totalSupply > 0 ? sh.grid_import_kwh / totalSupply : 1;
+      gridCost += h.cost * gridFrac;
+    } else {
+      gridCost += h.cost;
+    }
+  }
+
+  window._todayGridCost = gridCost;
+  document.getElementById('todayCost').textContent = '$' + gridCost.toFixed(2);
+  const saved = fullCost - gridCost;
+  document.getElementById('todayCostSub').textContent =
+    saved > 0.01 ? `grid only (full rate $${fullCost.toFixed(2)})` : 'grid cost';
+}
+
+// Store hourly data globally for drilldown
+window._hourlyData = [];
+window._hourlyView = 'cost';
+window._solarData = null;
+
+function setHourlyView(view, btn) {
+  if (!window._solarEnabled && view === 'source') return; // No solar data available
+  window._hourlyView = view;
+  if (btn) {
+    btn.closest('.period-selector').querySelectorAll('button').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+  }
+  if (window._hourlyData.length) {
+    if (view === 'source' && !window._solarData) {
+      // Fetch solar data on first source view
+      fetch('/api/solar?days=1').then(r => r.json()).then(d => {
+        if (!d.error) window._solarData = d;
+        renderHourlyChart();
+      });
+    } else {
+      renderHourlyChart();
+    }
+  }
+}
+
+function updateHourlyChart(hourly) {
+  window._hourlyData = hourly;
+  renderHourlyChart();
+}
+
+function renderHourlyChart() {
+  const hourly = window._hourlyData;
+  const ctx = document.getElementById('hourlyChart');
+  const touColors = {
+    'off_peak': 'rgba(34,197,94,0.7)',
+    'part_peak': 'rgba(234,179,8,0.7)',
+    'peak': 'rgba(239,68,68,0.7)',
+  };
+
+  const labels = hourly.map(h => {
+    const ampm = h.hour >= 12 ? 'p' : 'a';
+    const hr = h.hour % 12 || 12;
+    return hr + ampm + (h.partial ? '*' : '');
+  });
+
+  if (window._hourlyChart) window._hourlyChart.destroy();
+
+  // Build solar lookup for today (used by both source and cost views)
+  const solar = window._solarData;
+  const solarByHour = {};
+  if (solar && solar.hourly) {
+    const today = localDateStr();
+    solar.hourly.forEach(h => {
+      if (h.date === today) solarByHour[h.hour] = h;
+    });
+  }
+
+  if (window._hourlyView === 'source') {
+    // Source stacked view: use per-hour solar/grid data
+    // 3-way source split using actual HA battery discharge data
+    const hourlySource = hourly.map(h => {
+      const sh = solarByHour[h.hour];
+      if (sh) {
+        const consumption = h.kwh;
+        const solarKwh = sh.solar_kwh;
+        const gridKwh = sh.grid_import_kwh;
+        const batteryKwh = sh.battery_discharge_kwh || 0;
+        const total = solarKwh + gridKwh + batteryKwh;
+        if (total > 0) {
+          return {
+            solar: +(consumption * solarKwh / total).toFixed(2),
+            battery: +(consumption * batteryKwh / total).toFixed(2),
+            grid: +(consumption * gridKwh / total).toFixed(2),
+          };
+        }
+      }
+      return { solar: 0, battery: 0, grid: +h.kwh.toFixed(2) };
+    });
+
+    window._hourlyChart = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [
+          {
+            label: 'Solar',
+            data: hourlySource.map(s => s.solar),
+            backgroundColor: 'rgba(250,204,21,0.7)',
+            borderRadius: 2,
+          },
+          {
+            label: 'Battery',
+            data: hourlySource.map(s => s.battery),
+            backgroundColor: 'rgba(34,197,94,0.7)',
+            borderRadius: 2,
+          },
+          {
+            label: 'Grid',
+            data: hourlySource.map(s => s.grid),
+            backgroundColor: 'rgba(239,68,68,0.7)',
+            borderRadius: 2,
+          },
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        onClick: (evt, elements) => {
+          if (elements.length > 0) openDrilldown(elements[0].index);
+        },
+        plugins: {
+          legend: { position: 'top', labels: { color: '#8b8fa3', boxWidth: 12 } },
+          tooltip: {
+            callbacks: {
+              afterBody: (items) => {
+                const h = hourly[items[0].dataIndex];
+                return `Total: ${h.kwh.toFixed(1)} kWh \u00B7 $${h.cost.toFixed(2)}`;
+              }
+            }
+          }
+        },
+        scales: {
+          x: { stacked: true, ticks: { color: '#8b8fa3' }, grid: { display: false } },
+          y: {
+            stacked: true, beginAtZero: true,
+            ticks: { callback: v => v.toFixed(1) + ' kWh', color: '#8b8fa3' },
+            grid: { color: 'rgba(45,49,64,0.5)' },
+          }
+        },
+        onHover: (evt, elements) => {
+          evt.native.target.style.cursor = elements.length > 0 ? 'pointer' : 'default';
+        }
+      }
+    });
+  } else {
+    // Cost view (default) — show actual grid cost when solar data available
+    const hasSolar = Object.keys(solarByHour).length > 0;
+    const gridCosts = hourly.map(h => {
+      const sh = solarByHour[h.hour];
+      if (sh) {
+        const bat = sh.battery_discharge_kwh || 0;
+        const supply = sh.solar_kwh + sh.grid_import_kwh + bat;
+        const gridFrac = supply > 0 ? sh.grid_import_kwh / supply : 1;
+        return +(h.cost * gridFrac).toFixed(3);
+      }
+      return h.cost;
+    });
+    window._hourlyChart = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [{
+          label: hasSolar ? 'Grid Cost' : 'Cost',
+          data: gridCosts,
+          backgroundColor: hourly.map(h => {
+            const base = touColors[h.tou_period] || touColors.off_peak;
+            return h.partial ? base.replace('0.7', '0.35') : base;
+          }),
+          hoverBackgroundColor: hourly.map(h => {
+            const c = touColors[h.tou_period] || touColors.off_peak;
+            return c.replace('0.7', '1.0');
+          }),
+          borderRadius: 4,
+          borderWidth: hourly.map(h => h.partial ? 2 : 0),
+          borderColor: hourly.map(h => {
+            if (!h.partial) return 'transparent';
+            const c = touColors[h.tou_period] || touColors.off_peak;
+            return c.replace('0.7', '0.9');
+          }),
+          borderDash: hourly.map(h => h.partial ? [4, 2] : []),
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        onClick: (evt, elements) => {
+          if (elements.length > 0) openDrilldown(elements[0].index);
+        },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: (c) => {
+                const i = c.dataIndex;
+                const gc = gridCosts[i];
+                const fc = hourly[i].cost;
+                if (hasSolar && gc < fc - 0.005) {
+                  return `Grid: $${gc.toFixed(2)} (saved $${(fc - gc).toFixed(2)})`;
+                }
+                return `$${gc.toFixed(2)} (${hourly[i].kwh.toFixed(1)} kWh)`;
+              },
+              afterLabel: () => 'Click for circuit breakdown'
+            }
+          }
+        },
+        scales: {
+          y: {
+            beginAtZero: true,
+            ticks: { callback: v => '$' + v.toFixed(2), color: '#8b8fa3' },
+            grid: { color: 'rgba(45,49,64,0.5)' },
+          },
+          x: {
+            ticks: { color: '#8b8fa3' },
+            grid: { display: false },
+          }
+        },
+        onHover: (evt, elements) => {
+          evt.native.target.style.cursor = elements.length > 0 ? 'pointer' : 'default';
+        }
+      }
+    });
+  }
+}
+
+function openDrilldown(hourIndex) {
+  const h = window._hourlyData[hourIndex];
+  if (!h || !h.circuits) return;
+
+  const ampm = h.hour >= 12 ? 'PM' : 'AM';
+  const hr = h.hour % 12 || 12;
+  const nextHr = (h.hour + 1) % 12 || 12;
+  const nextAmpm = (h.hour + 1) >= 12 ? 'PM' : 'AM';
+  document.getElementById('drilldownTitle').textContent = `${hr}:00 ${ampm} — ${nextHr}:00 ${nextAmpm}`;
+
+  document.getElementById('drillCost').textContent = '$' + h.cost.toFixed(2);
+  document.getElementById('drillKwh').textContent = h.kwh.toFixed(2);
+
+  const periodLabel = h.tou_period.replace('_', '-').toUpperCase();
+  const periodEl = document.getElementById('drillPeriod');
+  periodEl.textContent = periodLabel;
+  periodEl.style.color = h.tou_period === 'peak' ? 'var(--red)' :
+    h.tou_period === 'part_peak' ? 'var(--yellow)' : 'var(--green)';
+
+  const maxKwh = Math.max(...h.circuits.map(c => c.kwh), 0.001);
+  const container = document.getElementById('drillCircuits');
+  container.innerHTML = h.circuits.map(c => {
+    const pct = (c.kwh / maxKwh) * 100;
+    return `<div class="drill-bar-row">
+      <div class="drill-name" title="${c.name}">${c.name}</div>
+      <div class="drill-bar"><div class="fill" style="width:${pct}%"></div></div>
+      <div class="drill-val">${c.kwh.toFixed(2)} kWh &middot; $${c.cost.toFixed(2)}</div>
+    </div>`;
+  }).join('');
+
+  document.getElementById('drilldownModal').classList.add('show');
+}
+
+function closeDrilldown() {
+  document.getElementById('drilldownModal').classList.remove('show');
+}
+
+// Close modal on overlay click or Escape
+document.getElementById('drilldownModal').addEventListener('click', (e) => {
+  if (e.target === e.currentTarget) closeDrilldown();
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') closeDrilldown();
+});
+
+// ==========================================
+// REST — Historical
+// ==========================================
+
+window._histView = 'cost';
+window._histData = null;
+window._histDays = 7;
+window._histSolarData = null;
+
+// Weekly circuit sorting state
+let histSortKey = 'cost';
+let histSortDesc = true;
+let histCircuitData = [];
+
+function setHistView(view, btn) {
+  if (!window._solarEnabled && view === 'source') return; // No solar data available
+  window._histView = view;
+  if (btn) {
+    btn.closest('.period-selector').querySelectorAll('button').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+  }
+  if (view === 'source' && !window._histSolarData) {
+    fetch(`/api/solar?days=${window._histDays}`).then(r => r.json()).then(d => {
+      if (!d.error) window._histSolarData = d;
+      renderHistoryChart();
+    });
+  } else {
+    renderHistoryChart();
+  }
+}
+
+async function loadHistory(days, btn) {
+  window._histDays = days;
+  window._histSolarData = null;
+  if (btn) {
+    btn.closest('.period-selector').querySelectorAll('button').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+  }
+
+  // Show loading state
+  const histPanel = document.getElementById('historyChart').closest('.panel-body');
+  histPanel.innerHTML =
+    '<div class="panel-loading" id="histLoading"><span class="spinner"></span>Loading ' + days + ' days of data...</div>' +
+    '<div class="chart-container"><canvas id="historyChart"></canvas></div>';
+  document.getElementById('histCircuitTable').innerHTML =
+    '<tr><td colspan="5" class="panel-loading"><span class="spinner"></span>Loading...</td></tr>';
+
+  try {
+    // Fetch history (+ solar in parallel when enabled)
+    const fetches = [fetch(`/api/history?days=${days}`)];
+    if (window._solarEnabled) fetches.push(fetch(`/api/solar?days=${days}`));
+
+    const responses = await Promise.all(fetches);
+    const d = await responses[0].json();
+    if (d.error) return;
+    window._histData = d;
+
+    if (window._solarEnabled && responses[1]) {
+      const sd = await responses[1].json();
+      if (!sd.error) window._histSolarData = sd;
+    }
+
+    // Clear loading
+    const loadingEl = document.getElementById('histLoading');
+    if (loadingEl) loadingEl.remove();
+
+    renderHistoryChart();
+    updateHistCircuits(d);
+  } catch (e) {
+    console.error('loadHistory error:', e);
+  }
+}
+
+function renderHistoryChart() {
+  const d = window._histData;
+  if (!d) return;
+  const daily = d.daily;
+  const ctx = document.getElementById('historyChart');
+  if (window._histChart) window._histChart.destroy();
+
+  const labels = daily.map(d => {
+    const dt = new Date(d.date + 'T12:00:00');
+    return dt.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+  });
+
+  if (window._histView === 'source' && window._histSolarData) {
+    const solar = window._histSolarData;
+    // Build per-hour lookup from HA data
+    const solarByHour = {};
+    if (solar.hourly) {
+      solar.hourly.forEach(h => {
+        solarByHour[h.date + ':' + h.hour] = h;
+      });
+    }
+
+    // Aggregate per-hour HA data (with actual battery discharge) to daily
+    const dailySource = daily.map(d => {
+      let daySolar = 0, dayBattery = 0, dayGrid = 0;
+      for (let hr = 0; hr < 24; hr++) {
+        const key = d.date + ':' + hr;
+        const sh = solarByHour[key];
+        if (sh) {
+          daySolar += sh.solar_kwh;
+          dayBattery += sh.battery_discharge_kwh || 0;
+          dayGrid += sh.grid_import_kwh;
+        }
+      }
+      const total = daySolar + dayBattery + dayGrid;
+      if (total > 0) {
+        return {
+          solar: +daySolar.toFixed(1),
+          battery: +dayBattery.toFixed(1),
+          grid: +dayGrid.toFixed(1),
+        };
+      }
+      return { solar: 0, battery: 0, grid: +d.total_kwh.toFixed(1) };
+    });
+
+    window._histChart = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [
+          {
+            label: 'Solar',
+            data: dailySource.map(s => s.solar),
+            backgroundColor: 'rgba(250,204,21,0.7)',
+            borderRadius: 2,
+          },
+          {
+            label: 'Battery',
+            data: dailySource.map(s => s.battery),
+            backgroundColor: 'rgba(34,197,94,0.7)',
+            borderRadius: 2,
+          },
+          {
+            label: 'Grid',
+            data: dailySource.map(s => s.grid),
+            backgroundColor: 'rgba(239,68,68,0.7)',
+            borderRadius: 2,
+          },
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { position: 'top', labels: { color: '#8b8fa3', boxWidth: 12 } },
+          tooltip: {
+            callbacks: {
+              afterBody: (items) => {
+                const day = daily[items[0].dataIndex];
+                return `Total: ${day.total_kwh.toFixed(1)} kWh \u00B7 $${day.total_cost.toFixed(2)}`;
+              }
+            }
+          }
+        },
+        scales: {
+          x: { stacked: true, ticks: { color: '#8b8fa3' }, grid: { display: false } },
+          y: {
+            stacked: true, beginAtZero: true,
+            ticks: { callback: v => v + ' kWh', color: '#8b8fa3' },
+            grid: { color: 'rgba(45,49,64,0.5)' },
+          }
+        }
+      }
+    });
+  } else {
+    // Cost view — stacked by TOU period
+    window._histChart = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [
+          {
+            label: 'Off-Peak',
+            data: daily.map(d => d.off_peak_cost),
+            backgroundColor: 'rgba(34,197,94,0.7)',
+            borderRadius: 2,
+          },
+          {
+            label: 'Part-Peak',
+            data: daily.map(d => d.part_peak_cost),
+            backgroundColor: 'rgba(234,179,8,0.7)',
+            borderRadius: 2,
+          },
+          {
+            label: 'Peak',
+            data: daily.map(d => d.peak_cost),
+            backgroundColor: 'rgba(239,68,68,0.7)',
+            borderRadius: 2,
+          },
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { position: 'top', labels: { color: '#8b8fa3', boxWidth: 12 } },
+          tooltip: {
+            callbacks: {
+              afterBody: (items) => {
+                const day = daily[items[0].dataIndex];
+                return `Total: $${day.total_cost.toFixed(2)} (${day.total_kwh.toFixed(1)} kWh)`;
+              }
+            }
+          }
+        },
+        scales: {
+          x: { stacked: true, ticks: { color: '#8b8fa3' }, grid: { display: false } },
+          y: {
+            stacked: true, beginAtZero: true,
+            ticks: { callback: v => '$' + v.toFixed(0), color: '#8b8fa3' },
+            grid: { color: 'rgba(45,49,64,0.5)' },
+          }
+        }
+      }
+    });
+  }
+}
+
+function updateHistCircuits(d) {
+  const solar = window._histSolarData;
+  let costLabel;
+  if (solar && solar.net_cost !== undefined) {
+    costLabel = `${d.days}d total: ${d.total_kwh} kWh — $${solar.net_cost.toFixed(2)} grid cost ($${(solar.net_cost / d.days).toFixed(2)}/day)`;
+  } else {
+    costLabel = `${d.days}d total: ${d.total_kwh} kWh — $${d.total_cost.toFixed(2)} ($${(d.total_cost / d.days).toFixed(2)}/day)`;
+  }
+  document.getElementById('histSummary').textContent = costLabel;
+
+  // Build circuit data with solar-adjusted peak %
+  const hasSolar = solar && solar.circuits && solar.circuits.length > 0;
+
+  histCircuitData = d.circuits.map(c => {
+    let peakPct = c.by_tou.peak.percent;  // total peak usage %
+    let gridPeakPct = peakPct;             // grid-only peak %
+    let displayCost = c.total_cost;
+    let displayDailyCost = c.avg_daily_cost;
+    if (hasSolar) {
+      const sc = solar.circuits.find(sc => sc.name === c.name);
+      if (sc) {
+        if (sc.by_tou && sc.total_kwh > 0) {
+          gridPeakPct = (sc.by_tou.peak.grid_kwh / sc.total_kwh) * 100;
+        }
+        displayCost = sc.grid_cost;
+        displayDailyCost = sc.grid_cost / d.days;
+      }
+    }
+    return {
+      name: c.name,
+      total_kwh: c.total_kwh,
+      total_cost: displayCost,
+      full_rate_cost: c.total_cost,
+      avg_daily_cost: displayDailyCost,
+      peak_pct: peakPct,       // total peak usage (what circuit uses during 4-9pm)
+      grid_peak_pct: gridPeakPct,  // grid-only peak (what grid pays for during peak)
+    };
+  });
+
+  // Update column headers when solar data is available
+  const peakHeader = document.getElementById('peakPctHeader');
+  if (peakHeader) {
+    const arrow = histSortKey === 'peak_pct' ? (histSortDesc ? '▼' : '▲') : '';
+    peakHeader.innerHTML = 'Peak %' + ` <span class="sort-arrow">${arrow}</span>`;
+  }
+  const costHeader = document.getElementById('histCostHeader');
+  if (costHeader) {
+    const arrow = histSortKey === 'cost' ? (histSortDesc ? '▼' : '▲') : '';
+    costHeader.innerHTML = (hasSolar ? 'Grid Cost' : 'Cost') + ` <span class="sort-arrow">${arrow}</span>`;
+  }
+
+  renderHistCircuitTable();
+  renderOpportunities(d.opportunities || []);
+}
+
+function sortHistCircuits(key) {
+  if (histSortKey === key) {
+    histSortDesc = !histSortDesc;
+  } else {
+    histSortKey = key;
+    histSortDesc = key !== 'name';
+  }
+  const table = document.getElementById('histCircuitTableWrap');
+  table.querySelectorAll('th.sortable').forEach(th => {
+    const isActive = th.dataset.sort === key;
+    th.classList.toggle('active', isActive);
+    const arrow = th.querySelector('.sort-arrow');
+    if (arrow) arrow.textContent = isActive ? (histSortDesc ? '▼' : '▲') : '';
+  });
+  renderHistCircuitTable();
+}
+
+function renderHistCircuitTable() {
+  const circuits = [...histCircuitData];
+  circuits.sort((a, b) => {
+    let va, vb;
+    switch (histSortKey) {
+      case 'name': va = a.name.toLowerCase(); vb = b.name.toLowerCase(); break;
+      case 'kwh': va = a.total_kwh; vb = b.total_kwh; break;
+      case 'cost': va = a.total_cost; vb = b.total_cost; break;
+      case 'daily_cost': va = a.avg_daily_cost; vb = b.avg_daily_cost; break;
+      case 'peak_pct': va = a.peak_pct; vb = b.peak_pct; break;
+      default: va = a.total_cost; vb = b.total_cost;
+    }
+    if (va < vb) return histSortDesc ? 1 : -1;
+    if (va > vb) return histSortDesc ? -1 : 1;
+    return 0;
+  });
+
+  const tbody = document.getElementById('histCircuitTable');
+  tbody.innerHTML = circuits.map(c => {
+    const peakColor = c.peak_pct > 40 ? 'var(--red)' : c.peak_pct > 25 ? 'var(--yellow)' : 'var(--text)';
+    // Show total peak % with battery coverage indicator
+    const batteryCovered = c.grid_peak_pct !== undefined && c.peak_pct > 1 && c.grid_peak_pct < 1;
+    const peakLabel = batteryCovered
+      ? `${c.peak_pct.toFixed(0)}% <span style="color:var(--battery-color);font-size:11px" title="Battery covers peak">⚡</span>`
+      : `${c.peak_pct.toFixed(0)}%`;
+    return `<tr>
+      <td>${c.name}</td>
+      <td class="right mono">${fmtWh(c.total_kwh)}</td>
+      <td class="right mono">$${c.total_cost.toFixed(2)}</td>
+      <td class="right mono">$${c.avg_daily_cost.toFixed(2)}</td>
+      <td class="right mono" style="color:${peakColor}">${peakLabel}</td>
+    </tr>`;
+  }).join('');
+}
+
+function renderOpportunities(opps) {
+  const panel = document.getElementById('opportunitiesPanel');
+  const list = document.getElementById('opportunitiesList');
+
+  if (!opps.length) {
+    panel.style.display = 'none';
+    return;
+  }
+
+  panel.style.display = '';
+
+  // Check if solar/battery is covering most peak usage
+  const solar = window._histSolarData;
+  let solarCoversPeak = false;
+  let solarPct = 0;
+  if (solar) {
+    const totalKwh = solar.solar_kwh + solar.grid_import_kwh;
+    solarPct = totalKwh > 0 ? Math.round((solar.solar_kwh / totalKwh) * 100) : 0;
+    // If solar+battery covers >70% of energy, peak usage matters less
+    solarCoversPeak = solarPct > 60;
+  }
+
+  // Adjust savings based on actual grid dependency
+  const adjustedOpps = opps.map(o => {
+    const gridFactor = solar ? (solar.grid_import_kwh / (solar.solar_kwh + solar.grid_import_kwh || 1)) : 1;
+    const adjustedSavings = o.potential_savings * gridFactor;
+    return { ...o, adjusted_savings: adjustedSavings, grid_factor: gridFactor };
+  });
+
+  const totalSavings = adjustedOpps.reduce((s, o) => s + o.adjusted_savings, 0);
+  const summaryEl = document.getElementById('oppSummary');
+
+  if (solarCoversPeak && totalSavings < 2) {
+    summaryEl.textContent = `Battery/solar covering ${solarPct}% — low grid impact`;
+  } else {
+    summaryEl.textContent = `~$${totalSavings.toFixed(2)}/wk potential savings`;
+  }
+
+  list.innerHTML = adjustedOpps.map(o => {
+    const isCovered = solarCoversPeak && o.adjusted_savings < 0.50;
+    if (isCovered) {
+      return `<div class="opp-card" style="opacity:0.6">
+        <div class="opp-icon" style="background:rgba(34,197,94,0.12)">\u2714</div>
+        <div class="opp-body">
+          <div class="opp-title">${o.circuit}</div>
+          <div class="opp-detail">${o.peak_pct}% during peak hours — <strong>covered by battery/solar</strong>, no action needed</div>
+        </div>
+        <div class="opp-savings" style="color:var(--text-muted)">OK</div>
+      </div>`;
+    }
+    const isHigh = o.peak_pct > 40;
+    return `<div class="opp-card">
+      <div class="opp-icon ${isHigh ? 'alert' : 'warn'}">${isHigh ? '\u26A0' : '\u26A1'}</div>
+      <div class="opp-body">
+        <div class="opp-title">${o.circuit}</div>
+        <div class="opp-detail">${o.peak_pct}% peak usage \u00B7 $${o.peak_cost}/wk grid peak cost \u00B7 $${o.avg_daily_cost.toFixed(2)}/day total</div>
+      </div>
+      <div class="opp-savings">-$${o.adjusted_savings.toFixed(2)}/wk</div>
+    </div>`;
+  }).join('');
+}
+
+// ==========================================
+// REST — Solar
+// ==========================================
+
+async function loadSolar() {
+  try {
+    const r = await fetch('/api/solar?days=7');
+    const d = await r.json();
+    if (d.error) {
+      // Solar API failed — reset grid cost so WS can update
+      window._todayGridCost = null;
+      return;
+    }
+
+    document.getElementById('solarSavings').textContent = '$' + d.solar_savings.toFixed(2);
+    const moEst = (d.solar_savings / d.days * 30).toFixed(0);
+    document.getElementById('solarSavingsSub').textContent = `${d.days}-day total · ~$${moEst}/mo savings`;
+
+    // Self-sufficiency: fraction of consumption NOT from grid
+    // Guard: grid_import > consumption possible when battery charges from grid
+    const consumption = d.consumption_kwh || 1;
+    const selfSuff = ((consumption - d.grid_import_kwh) / consumption * 100);
+    document.getElementById('selfSuff').textContent = Math.max(0, selfSuff).toFixed(0) + '%';
+    document.getElementById('selfSuffSub').textContent = `${d.days}-day avg · non-grid`;
+
+    // Extract today's hourly data from the 7-day response to adjust Today's Cost
+    window._todaySolarData = d;
+    applyTodaySolarAdjustment();
+  } catch (e) {
+    console.error('loadSolar error:', e);
+    window._todayGridCost = null;
+  }
+}
+
+// ==========================================
+// Init
+// ==========================================
+
+window._solarEnabled = true; // default, updated by /api/config
+
+async function init() {
+  try {
+    const r = await fetch('/api/config');
+    const cfg = await r.json();
+    window._solarEnabled = cfg.solar_enabled;
+    if (!cfg.solar_enabled) {
+      document.body.classList.add('no-solar');
+    }
+  } catch (e) {
+    console.error('Config fetch failed, assuming solar enabled:', e);
+  }
+
+  connect();
+  loadToday();
+  loadHistory(7);
+
+  if (window._solarEnabled) {
+    loadSolar();
+    setInterval(loadSolar, 1800000);
+  } else {
+    // No solar — show full-rate cost directly
+    document.getElementById('todayCostSub').textContent = 'full rate';
+  }
+
+  setInterval(loadToday, 60000);
+}
+
+init();
+</script>
+</body>
+</html>

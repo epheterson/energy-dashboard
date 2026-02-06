@@ -1,0 +1,49 @@
+# Energy Dashboard Configuration
+# Copy this to config.yml and customize for your setup.
+
+# Utility Rate Plan
+rates:
+  plan_name: "PG&E EV2-A"
+  winter:
+    peak: 0.63
+    part_peak: 0.60
+    off_peak: 0.40
+  summer:
+    peak: 0.63
+    part_peak: 0.60
+    off_peak: 0.40
+  summer_months: [6, 7, 8, 9]
+
+# TOU Period Hours (0-23). Unlisted hours default to off_peak.
+tou_periods:
+  peak: [16, 17, 18, 19, 20]
+  part_peak: [15, 21, 22, 23]
+
+# Solar/Battery via Home Assistant (optional)
+# Set enabled: true if you have solar + HA integration
+solar:
+  enabled: false
+  ha_entities:
+    solar_power: "sensor.solar_power_plant_solar_power"
+    grid_power: "sensor.solar_power_plant_grid_power"
+    battery_power: "sensor.solar_power_plant_battery_power"
+    load_power: "sensor.solar_power_plant_load_power"
+    soc: "sensor.solar_power_plant_percentage_charged"
+    solar_generated: "sensor.solar_power_plant_solar_generated"
+    grid_imported: "sensor.solar_power_plant_grid_imported"
+    grid_exported: "sensor.solar_power_plant_grid_exported"
+    battery_charged: "sensor.solar_power_plant_battery_charged"
+    battery_discharged: "sensor.solar_power_plant_battery_discharged"
+  export_credits:
+    winter:
+      peak: 0.16
+      part_peak: 0.14
+      off_peak: 0.12
+    summer:
+      peak: 0.16
+      part_peak: 0.14
+      off_peak: 0.12
+
+# Alert Thresholds
+alerts:
+  high_peak_usage_percent: 30
