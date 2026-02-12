@@ -522,6 +522,13 @@ def _build_solar(days):
 
     # Battery economics (from charge source attribution)
     if system.get("battery_cost_per_kwh") is not None:
+        # Compute value displaced: what battery discharge would cost at grid rates per TOU period
+        battery_value_displaced = 0
+        for period in ['peak', 'part_peak', 'off_peak']:
+            discharge_kwh = system['by_tou'][period].get('battery_discharge', 0)
+            period_rate = get_rate(datetime.now(), period)
+            battery_value_displaced += discharge_kwh * period_rate
+
         result["battery"] = {
             "cost_per_kwh": round(system["battery_cost_per_kwh"], 4),
             "solar_pct": system["battery_solar_pct"],
@@ -533,6 +540,7 @@ def _build_solar(days):
             "efficiency": system["battery_efficiency_measured"],
             "energy_lost_kwh": system["battery_energy_lost_kwh"],
             "total_battery_cost": round(system.get("total_battery_cost", 0), 2),
+            "value_displaced": round(battery_value_displaced, 2),
         }
 
     return result

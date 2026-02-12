@@ -711,8 +711,8 @@ tr:last-child td { border-bottom: none; }
     <h2 id="hourlyTitle">Today — Hourly</h2>
     <div style="display:flex;gap:8px">
       <div class="period-selector" id="daySelector">
-        <button class="active" onclick="loadDay('today', this)">Today</button>
         <button onclick="loadDay('yesterday', this)">Yesterday</button>
+        <button class="active" onclick="loadDay('today', this)">Today</button>
       </div>
       <div class="period-selector" data-solar-toggle>
         <button class="active" onclick="setHourlyView('cost', this)">Cost</button>
@@ -1890,17 +1890,20 @@ async function loadSolar() {
       const row = document.getElementById('batteryStatsRow');
       row.style.display = '';
 
-      // Cost per kWh
+      // Cost per kWh — compare to peak rate (battery displaces peak/part-peak grid usage)
       document.getElementById('batCostPerKwh').textContent = '$' + bat.cost_per_kwh.toFixed(3);
-      const gridRate = d.grid_cost / (d.grid_import_kwh || 1);
-      const discount = ((1 - bat.cost_per_kwh / gridRate) * 100);
-      document.getElementById('batCostSub').textContent =
-        bat.cost_per_kwh > 0.001
-          ? `${discount.toFixed(0)}% cheaper than grid avg`
-          : 'free (100% solar-charged)';
+      const peakRate = 0.63;
+      if (bat.cost_per_kwh > 0.001) {
+        const vsPeak = ((1 - bat.cost_per_kwh / peakRate) * 100);
+        document.getElementById('batCostSub').textContent = `${vsPeak.toFixed(0)}% cheaper than peak ($${peakRate.toFixed(2)})`;
+      } else {
+        document.getElementById('batCostSub').textContent = 'free (100% solar-charged)';
+      }
 
-      // Charge source
-      document.getElementById('batSolarPct').textContent = bat.solar_pct.toFixed(0) + '%';
+      // Charge source — show 1 decimal so 0.2% doesn't round to 0%
+      const solarPctDisplay = bat.solar_pct < 1 && bat.solar_pct > 0
+        ? '< 1%' : bat.solar_pct.toFixed(0) + '%';
+      document.getElementById('batSolarPct').textContent = solarPctDisplay;
       document.getElementById('batChargeSub').textContent =
         `☀ ${bat.solar_charge_kwh.toFixed(1)} kWh · ⏻ ${bat.grid_charge_kwh.toFixed(1)} kWh`;
 
@@ -1909,14 +1912,11 @@ async function loadSolar() {
       document.getElementById('batEffSub').textContent =
         `${bat.charge_kwh.toFixed(1)} in → ${bat.discharge_kwh.toFixed(1)} out · ${bat.energy_lost_kwh.toFixed(1)} kWh lost`;
 
-      // Battery savings (what peak discharge would have cost at grid peak rate)
-      // Peak discharge cost avoided = peak_battery_discharge * peak_rate - actual battery cost during peak
-      const peakRate = 0.63; // Could pull from config, but hardcoded is fine for display
-      const peakBatDischarge = d.battery_discharge_kwh || bat.discharge_kwh;
-      const batSavingsVal = (peakBatDischarge * peakRate) - bat.total_battery_cost;
+      // Battery savings = value displaced at grid rates - actual battery cost
+      const batSavingsVal = (bat.value_displaced || 0) - bat.total_battery_cost;
       document.getElementById('batSavings').textContent = '$' + Math.max(0, batSavingsVal).toFixed(2);
       document.getElementById('batSavingsSub').textContent =
-        `${d.days}d · battery vs grid rates`;
+        `${d.days}d · grid rates avoided`;
     }
 
     // Extract hourly data to adjust Today's Cost
