@@ -4,6 +4,8 @@ services:
     container_name: energy-dashboard
     restart: unless-stopped
     mem_limit: 512m
+    labels:
+      - "com.centurylinklabs.watchtower.enable=false"
     ports:
       - "8400:8400"
     env_file:
