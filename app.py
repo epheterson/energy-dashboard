@@ -198,13 +198,13 @@ async def fetch_egauge_today(target_date=None):
         current_url = f"{EGAUGE_URL}/cgi-bin/egauge-show?c&m&n=2"
     else:
         target_date_str = target_date
-        # Historical date: fetch 25 hourly rows covering the full day
-        # Use end-of-day timestamp as reference point, eGauge goes backwards from there
-        target = datetime.strptime(target_date_str, '%Y-%m-%d')
-        end_of_day = target.replace(hour=0, minute=0, second=0) + timedelta(days=1)
-        end_ts = int(end_of_day.timestamp())
-        n_rows = 26  # 25 diffs = 24 hours + 1 boundary
-        hourly_url = f"{EGAUGE_URL}/cgi-bin/egauge-show?c&h&t={end_ts}&n={n_rows}"
+        # Historical date: request enough rows to cover today + target date
+        # eGauge always returns most recent N hourly readings (no random-access by timestamp)
+        target_dt = datetime.strptime(target_date_str, '%Y-%m-%d')
+        days_ago = (now.date() - target_dt.date()).days
+        # Need 24 hours per day + today's hours + 2 buffer (eGauge n-1 quirk)
+        n_rows = (days_ago + 1) * 24 + now.hour + 3
+        hourly_url = f"{EGAUGE_URL}/cgi-bin/egauge-show?c&h&n={n_rows}"
         current_url = None  # No partial hour for historical dates
 
     async with httpx.AsyncClient() as client:
