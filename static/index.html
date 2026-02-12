@@ -657,7 +657,10 @@ tr:last-child td { border-bottom: none; }
   <div class="panel-header">
     <h2>Circuits — Live</h2>
     <div style="display:flex;align-items:center;gap:8px">
-      <span class="source-legend"><span class="legend-dot" style="background:var(--solar)"></span>Solar <span class="legend-dot" style="background:var(--battery-color)"></span>Battery <span class="legend-dot" style="background:var(--grid-color)"></span>Grid</span>
+      <div class="source-col" style="display:flex;align-items:center;gap:8px">
+        <div class="source-bar" id="headerSourceBar" style="width:100px"></div>
+        <span class="source-legend" id="headerSourceLabel" style="white-space:nowrap;font-size:11px;color:var(--text-muted)"></span>
+      </div>
     </div>
   </div>
   <div class="panel-body" style="padding:0">
@@ -668,7 +671,6 @@ tr:last-child td { border-bottom: none; }
           <th class="right sortable active" data-sort="watts" onclick="sortCircuits('watts')">Now <span class="sort-arrow">▼</span></th>
           <th class="right sortable" data-sort="kwh" onclick="sortCircuits('kwh')">Today <span class="sort-arrow"></span></th>
           <th class="right sortable" data-sort="cost" onclick="sortCircuits('cost')">Cost <span class="sort-arrow"></span></th>
-          <th style="width:120px" class="source-col">Source</th>
         </tr>
       </thead>
       <tbody id="circuitTable"></tbody>
@@ -745,7 +747,7 @@ tr:last-child td { border-bottom: none; }
 <!-- Historical Circuits -->
 <div class="panel">
   <div class="panel-header">
-    <h2>Weekly Circuit Breakdown</h2>
+    <h2 id="histCircuitTitle">Circuit Breakdown</h2>
     <div id="histSummary" style="font-size:13px;color:var(--text-muted)"></div>
   </div>
   <div class="panel-body" style="padding:0">
@@ -974,20 +976,31 @@ function renderCircuitTable() {
   });
 
   tbody.innerHTML = rows.map(c => {
-    // Source bar: fixed-width, shows current source mix proportions
-    const s = mix.solar, b = mix.battery, g = mix.grid;
     return `<tr>
       <td>${c.name}</td>
       <td class="right mono">${fmtW(c.watts)}</td>
       <td class="right mono">${fmtWh(c.todayKwh)}</td>
       <td class="right mono">$${c.todayCost.toFixed(2)}</td>
-      <td class="source-col"><div class="source-bar">
-        ${s > 0.5 ? `<div class="seg solar" style="width:${s}%"></div>` : ''}
-        ${b > 0.5 ? `<div class="seg battery" style="width:${b}%"></div>` : ''}
-        ${g > 0.5 ? `<div class="seg grid" style="width:${g}%"></div>` : ''}
-      </div></td>
     </tr>`;
   }).join('');
+
+  // Update header source bar with current mix
+  const s = mix.solar, b = mix.battery, g = mix.grid;
+  const bar = document.getElementById('headerSourceBar');
+  const label = document.getElementById('headerSourceLabel');
+  if (bar) {
+    bar.innerHTML =
+      (s > 0.5 ? `<div class="seg solar" style="width:${s}%"></div>` : '') +
+      (b > 0.5 ? `<div class="seg battery" style="width:${b}%"></div>` : '') +
+      (g > 0.5 ? `<div class="seg grid" style="width:${g}%"></div>` : '');
+  }
+  if (label) {
+    const parts = [];
+    if (s > 0.5) parts.push(`☀ ${Math.round(s)}%`);
+    if (b > 0.5) parts.push(`⚡ ${Math.round(b)}%`);
+    if (g > 0.5) parts.push(`⏻ ${Math.round(g)}%`);
+    label.textContent = parts.join('  ');
+  }
 }
 
 function fmt(n) {
@@ -1186,16 +1199,20 @@ function renderHourlyChart() {
       options: {
         responsive: true,
         maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
         onClick: (evt, elements) => {
           if (elements.length > 0) openDrilldown(elements[0].index);
         },
         plugins: {
           legend: { position: 'top', labels: { color: '#8b8fa3', boxWidth: 12 } },
           tooltip: {
+            mode: 'index',
+            intersect: false,
             callbacks: {
+              label: (c) => `${c.dataset.label}: ${c.parsed.y.toFixed(2)} kWh`,
               afterBody: (items) => {
                 const h = hourly[items[0].dataIndex];
-                return `Total: ${h.kwh.toFixed(1)} kWh \u00B7 $${h.cost.toFixed(2)}`;
+                return `Total: ${h.kwh.toFixed(1)} kWh · $${h.cost.toFixed(2)}`;
               }
             }
           }
@@ -1484,13 +1501,17 @@ function renderHistoryChart() {
       options: {
         responsive: true,
         maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
         plugins: {
           legend: { position: 'top', labels: { color: '#8b8fa3', boxWidth: 12 } },
           tooltip: {
+            mode: 'index',
+            intersect: false,
             callbacks: {
+              label: (c) => `${c.dataset.label}: ${c.parsed.y.toFixed(1)} kWh`,
               afterBody: (items) => {
                 const day = daily[items[0].dataIndex];
-                return `Total: ${day.total_kwh.toFixed(1)} kWh \u00B7 $${day.total_cost.toFixed(2)}`;
+                return `Total: ${day.total_kwh.toFixed(1)} kWh · $${day.total_cost.toFixed(2)}`;
               }
             }
           }
@@ -1535,10 +1556,14 @@ function renderHistoryChart() {
       options: {
         responsive: true,
         maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
         plugins: {
           legend: { position: 'top', labels: { color: '#8b8fa3', boxWidth: 12 } },
           tooltip: {
+            mode: 'index',
+            intersect: false,
             callbacks: {
+              label: (c) => `${c.dataset.label}: $${c.parsed.y.toFixed(2)}`,
               afterBody: (items) => {
                 const day = daily[items[0].dataIndex];
                 return `Total: $${day.total_cost.toFixed(2)} (${day.total_kwh.toFixed(1)} kWh)`;
@@ -1560,6 +1585,13 @@ function renderHistoryChart() {
 }
 
 function updateHistCircuits(d) {
+  // Update panel title to match selected period
+  const titleEl = document.getElementById('histCircuitTitle');
+  if (titleEl) {
+    const label = d.days <= 7 ? 'Weekly' : d.days + '-Day';
+    titleEl.textContent = label + ' Circuit Breakdown';
+  }
+
   const solar = window._histSolarData;
   let costLabel;
   if (solar && solar.net_cost !== undefined) {
@@ -1669,59 +1701,54 @@ function renderHistCircuitTable() {
 function renderOpportunities(opps) {
   const panel = document.getElementById('opportunitiesPanel');
   const list = document.getElementById('opportunitiesList');
+  const solar = window._histSolarData;
 
   if (!opps.length) {
     panel.style.display = 'none';
     return;
   }
 
-  panel.style.display = '';
+  // Use per-circuit data from histCircuitData to check battery coverage
+  const circuitLookup = {};
+  histCircuitData.forEach(c => { circuitLookup[c.name] = c; });
 
-  // Check if solar/battery is covering most peak usage
-  const solar = window._histSolarData;
-  let solarCoversPeak = false;
-  let solarPct = 0;
-  if (solar) {
-    const totalKwh = solar.solar_kwh + solar.grid_import_kwh;
-    solarPct = totalKwh > 0 ? Math.round((solar.solar_kwh / totalKwh) * 100) : 0;
-    // If solar+battery covers >70% of energy, peak usage matters less
-    solarCoversPeak = solarPct > 60;
-  }
-
-  // Adjust savings based on actual grid dependency
+  // Adjust savings per-circuit using actual grid peak data
   const adjustedOpps = opps.map(o => {
-    const gridFactor = solar ? (solar.grid_import_kwh / (solar.solar_kwh + solar.grid_import_kwh || 1)) : 1;
+    const cd = circuitLookup[o.circuit];
+    let gridFactor = 1;
+    let batteryCovered = false;
+    if (cd && solar) {
+      // If grid_peak_pct is much lower than peak_pct, battery is handling peak
+      gridFactor = cd.peak_pct > 0 ? cd.grid_peak_pct / cd.peak_pct : 1;
+      batteryCovered = cd.grid_peak_pct < 5; // <5% grid during peak = battery handles it
+    }
     const adjustedSavings = o.potential_savings * gridFactor;
-    return { ...o, adjusted_savings: adjustedSavings, grid_factor: gridFactor };
+    return { ...o, adjusted_savings: adjustedSavings, grid_factor: gridFactor, battery_covered: batteryCovered };
   });
 
-  const totalSavings = adjustedOpps.reduce((s, o) => s + o.adjusted_savings, 0);
-  const summaryEl = document.getElementById('oppSummary');
+  // Filter: hide opportunities with trivial grid impact
+  const meaningful = adjustedOpps.filter(o => o.adjusted_savings >= 0.25 && !o.battery_covered);
+  const covered = adjustedOpps.filter(o => o.adjusted_savings < 0.25 || o.battery_covered);
 
-  if (solarCoversPeak && totalSavings < 2) {
-    summaryEl.textContent = `Battery/solar covering ${solarPct}% — low grid impact`;
-  } else {
-    summaryEl.textContent = `~$${totalSavings.toFixed(2)}/wk potential savings`;
+  if (!meaningful.length) {
+    // All covered by battery — hide the panel entirely
+    panel.style.display = 'none';
+    return;
   }
 
-  list.innerHTML = adjustedOpps.map(o => {
-    const isCovered = solarCoversPeak && o.adjusted_savings < 0.50;
-    if (isCovered) {
-      return `<div class="opp-card" style="opacity:0.6">
-        <div class="opp-icon" style="background:rgba(34,197,94,0.12)">\u2714</div>
-        <div class="opp-body">
-          <div class="opp-title">${o.circuit}</div>
-          <div class="opp-detail">${o.peak_pct}% during peak hours — <strong>covered by battery/solar</strong>, no action needed</div>
-        </div>
-        <div class="opp-savings" style="color:var(--text-muted)">OK</div>
-      </div>`;
-    }
+  panel.style.display = '';
+  const totalSavings = meaningful.reduce((s, o) => s + o.adjusted_savings, 0);
+  const summaryEl = document.getElementById('oppSummary');
+  summaryEl.textContent = `~$${totalSavings.toFixed(2)}/wk potential savings`;
+
+  list.innerHTML = meaningful.map(o => {
     const isHigh = o.peak_pct > 40;
+    const gridNote = o.grid_factor < 0.8 ? ` (${Math.round(o.grid_factor * 100)}% grid)` : '';
     return `<div class="opp-card">
       <div class="opp-icon ${isHigh ? 'alert' : 'warn'}">${isHigh ? '\u26A0' : '\u26A1'}</div>
       <div class="opp-body">
         <div class="opp-title">${o.circuit}</div>
-        <div class="opp-detail">${o.peak_pct}% peak usage \u00B7 $${o.peak_cost}/wk grid peak cost \u00B7 $${o.avg_daily_cost.toFixed(2)}/day total</div>
+        <div class="opp-detail">${o.peak_pct}% peak usage${gridNote} · $${o.avg_daily_cost.toFixed(2)}/day total</div>
       </div>
       <div class="opp-savings">-$${o.adjusted_savings.toFixed(2)}/wk</div>
     </div>`;

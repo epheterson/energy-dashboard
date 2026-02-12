@@ -180,7 +180,7 @@ async def fetch_egauge_today():
 
     now = datetime.now()
     hours_today = now.hour + 1  # Include current partial hour
-    n_rows = max(hours_today + 1, 2)  # Need at least 2 for diffing
+    n_rows = hours_today + 2  # eGauge returns n-1 data rows; need hours+1 for diffing
 
     hourly_url = f"{EGAUGE_URL}/cgi-bin/egauge-show?c&h&n={n_rows}"
     # Also fetch current cumulative reading for partial hour
