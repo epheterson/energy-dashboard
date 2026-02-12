@@ -184,7 +184,8 @@ async def fetch_egauge_today():
 
     hourly_url = f"{EGAUGE_URL}/cgi-bin/egauge-show?c&h&n={n_rows}"
     # Also fetch current cumulative reading for partial hour
-    current_url = f"{EGAUGE_URL}/cgi-bin/egauge-show?c&n=1"
+    # eGauge returns n-1 data rows, so n=2 gives us 1 row
+    current_url = f"{EGAUGE_URL}/cgi-bin/egauge-show?c&n=2"
 
     async with httpx.AsyncClient() as client:
         for attempt in range(3):
