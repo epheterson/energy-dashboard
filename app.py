@@ -78,15 +78,21 @@ async def fetch_egauge_instant():
 
     url = f"{EGAUGE_URL}/cgi-bin/egauge?notemp&tot&inst"
     async with httpx.AsyncClient() as client:
-        try:
-            resp = await client.get(
-                url,
-                auth=(EGAUGE_USER, EGAUGE_PASSWORD),
-                timeout=10,
-            )
-            resp.raise_for_status()
-        except httpx.HTTPError:
-            return None
+        for attempt in range(3):
+            try:
+                resp = await client.get(
+                    url,
+                    auth=(EGAUGE_USER, EGAUGE_PASSWORD),
+                    timeout=10,
+                )
+                resp.raise_for_status()
+                break
+            except httpx.HTTPError as e:
+                if attempt < 2:
+                    await asyncio.sleep(1 * (attempt + 1))
+                    continue
+                print(f"eGauge fetch failed after 3 attempts: {e}")
+                return None
 
     # Parse XML
     root = ET.fromstring(resp.text)
@@ -181,14 +187,20 @@ async def fetch_egauge_today():
     current_url = f"{EGAUGE_URL}/cgi-bin/egauge-show?c&n=1"
 
     async with httpx.AsyncClient() as client:
-        try:
-            hourly_resp, current_resp = await asyncio.gather(
-                client.get(hourly_url, auth=(EGAUGE_USER, EGAUGE_PASSWORD), timeout=15),
-                client.get(current_url, auth=(EGAUGE_USER, EGAUGE_PASSWORD), timeout=15),
-            )
-            hourly_resp.raise_for_status()
-        except httpx.HTTPError:
-            return None
+        for attempt in range(3):
+            try:
+                hourly_resp, current_resp = await asyncio.gather(
+                    client.get(hourly_url, auth=(EGAUGE_USER, EGAUGE_PASSWORD), timeout=15),
+                    client.get(current_url, auth=(EGAUGE_USER, EGAUGE_PASSWORD), timeout=15),
+                )
+                hourly_resp.raise_for_status()
+                break
+            except httpx.HTTPError as e:
+                if attempt < 2:
+                    await asyncio.sleep(1 * (attempt + 1))
+                    continue
+                print(f"eGauge hourly fetch failed after 3 attempts: {e}")
+                return None
 
     def parse_egauge_rows(text):
         reader = csv.DictReader(StringIO(text))
@@ -216,8 +228,8 @@ async def fetch_egauge_today():
             latest = current_rows[-1]
             if latest["datetime"] > rows[-1]["datetime"]:
                 rows.append(latest)
-    except Exception:
-        pass  # Fall back to completed hours only
+    except Exception as e:
+        print(f"Failed to append current reading for partial hour: {e}")
 
     # Diff consecutive rows for hourly consumption
     hourly = []
