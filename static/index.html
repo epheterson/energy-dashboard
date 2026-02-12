@@ -645,11 +645,14 @@ tr:last-child td { border-bottom: none; }
 
 <!-- Optimization Opportunities -->
 <div class="panel" id="opportunitiesPanel" style="display:none">
-  <div class="panel-header">
-    <h2>Optimization Opportunities</h2>
+  <div class="panel-header" style="cursor:pointer" onclick="toggleOpportunities()">
+    <div style="display:flex;align-items:center;gap:8px">
+      <span id="oppChevron" style="font-size:12px;color:var(--text-muted);transition:transform 0.2s">&#9654;</span>
+      <h2 style="font-size:12px">Optimization</h2>
+    </div>
     <span style="font-size:12px;color:var(--text-muted)" id="oppSummary"></span>
   </div>
-  <div class="panel-body" style="padding:12px 20px" id="opportunitiesList"></div>
+  <div class="panel-body" style="padding:12px 20px;display:none" id="opportunitiesList"></div>
 </div>
 
 <!-- Circuits Table -->
@@ -1131,11 +1134,22 @@ function renderHourlyChart() {
     'peak': 'rgba(239,68,68,0.7)',
   };
 
-  const labels = hourly.map(h => {
+  // Build full 24-hour axis so bars maintain proper width
+  const hourLookup = {};
+  hourly.forEach(h => { hourLookup[h.hour] = h; });
+  const full24 = [];
+  for (let hr = 0; hr < 24; hr++) {
+    full24.push(hourLookup[hr] || { hour: hr, kwh: 0, cost: 0, tou_period: 'off_peak', circuits: [], partial: false, _empty: true });
+  }
+
+  const labels = full24.map(h => {
     const ampm = h.hour >= 12 ? 'p' : 'a';
     const hr = h.hour % 12 || 12;
     return hr + ampm + (h.partial ? '*' : '');
   });
+
+  // Store full 24h for drilldown click handler
+  window._hourlyFull24 = full24;
 
   if (window._hourlyChart) window._hourlyChart.destroy();
 
@@ -1152,7 +1166,7 @@ function renderHourlyChart() {
   if (window._hourlyView === 'source') {
     // Source stacked view: use per-hour solar/grid data
     // 3-way source split using actual HA battery discharge data
-    const hourlySource = hourly.map(h => {
+    const hourlySource = full24.map(h => {
       const sh = solarByHour[h.hour];
       if (sh) {
         const consumption = h.kwh;
@@ -1201,18 +1215,20 @@ function renderHourlyChart() {
         maintainAspectRatio: false,
         interaction: { mode: 'index', intersect: false },
         onClick: (evt, elements) => {
-          if (elements.length > 0) openDrilldown(elements[0].index);
+          if (elements.length > 0 && !full24[elements[0].index]._empty) openDrilldown(elements[0].index);
         },
         plugins: {
           legend: { position: 'top', labels: { color: '#8b8fa3', boxWidth: 12 } },
           tooltip: {
             mode: 'index',
             intersect: false,
+            filter: (item) => item.parsed.y > 0,
             callbacks: {
               label: (c) => `${c.dataset.label}: ${c.parsed.y.toFixed(2)} kWh`,
               afterBody: (items) => {
-                const h = hourly[items[0].dataIndex];
-                return `Total: ${h.kwh.toFixed(1)} kWh · $${h.cost.toFixed(2)}`;
+                if (!items.length) return '';
+                const h = full24[items[0].dataIndex];
+                return h._empty ? '' : `Total: ${h.kwh.toFixed(1)} kWh · $${h.cost.toFixed(2)}`;
               }
             }
           }
@@ -1226,14 +1242,15 @@ function renderHourlyChart() {
           }
         },
         onHover: (evt, elements) => {
-          evt.native.target.style.cursor = elements.length > 0 ? 'pointer' : 'default';
+          evt.native.target.style.cursor = (elements.length > 0 && !full24[elements[0].index]._empty) ? 'pointer' : 'default';
         }
       }
     });
   } else {
     // Cost view (default) — show actual grid cost when solar data available
     const hasSolar = Object.keys(solarByHour).length > 0;
-    const gridCosts = hourly.map(h => {
+    const gridCosts = full24.map(h => {
+      if (h._empty) return 0;
       const sh = solarByHour[h.hour];
       if (sh) {
         const bat = sh.battery_discharge_kwh || 0;
@@ -1250,44 +1267,49 @@ function renderHourlyChart() {
         datasets: [{
           label: hasSolar ? 'Grid Cost' : 'Cost',
           data: gridCosts,
-          backgroundColor: hourly.map(h => {
+          backgroundColor: full24.map(h => {
             const base = touColors[h.tou_period] || touColors.off_peak;
+            if (h._empty) return 'transparent';
             return h.partial ? base.replace('0.7', '0.35') : base;
           }),
-          hoverBackgroundColor: hourly.map(h => {
+          hoverBackgroundColor: full24.map(h => {
+            if (h._empty) return 'transparent';
             const c = touColors[h.tou_period] || touColors.off_peak;
             return c.replace('0.7', '1.0');
           }),
           borderRadius: 4,
-          borderWidth: hourly.map(h => h.partial ? 2 : 0),
-          borderColor: hourly.map(h => {
+          borderWidth: full24.map(h => h.partial ? 2 : 0),
+          borderColor: full24.map(h => {
             if (!h.partial) return 'transparent';
             const c = touColors[h.tou_period] || touColors.off_peak;
             return c.replace('0.7', '0.9');
           }),
-          borderDash: hourly.map(h => h.partial ? [4, 2] : []),
+          borderDash: full24.map(h => h.partial ? [4, 2] : []),
         }]
       },
       options: {
         responsive: true,
         maintainAspectRatio: false,
         onClick: (evt, elements) => {
-          if (elements.length > 0) openDrilldown(elements[0].index);
+          if (elements.length > 0 && !full24[elements[0].index]._empty) openDrilldown(elements[0].index);
         },
         plugins: {
           legend: { display: false },
           tooltip: {
+            filter: (item) => item.parsed.y > 0,
             callbacks: {
               label: (c) => {
                 const i = c.dataIndex;
+                const h = full24[i];
+                if (h._empty) return '';
                 const gc = gridCosts[i];
-                const fc = hourly[i].cost;
+                const fc = h.cost;
                 if (hasSolar && gc < fc - 0.005) {
                   return `Grid: $${gc.toFixed(2)} (saved $${(fc - gc).toFixed(2)})`;
                 }
-                return `$${gc.toFixed(2)} (${hourly[i].kwh.toFixed(1)} kWh)`;
+                return `$${gc.toFixed(2)} (${h.kwh.toFixed(1)} kWh)`;
               },
-              afterLabel: () => 'Click for circuit breakdown'
+              afterLabel: (c) => full24[c.dataIndex]._empty ? '' : 'Click for circuit breakdown'
             }
           }
         },
@@ -1303,7 +1325,7 @@ function renderHourlyChart() {
           }
         },
         onHover: (evt, elements) => {
-          evt.native.target.style.cursor = elements.length > 0 ? 'pointer' : 'default';
+          evt.native.target.style.cursor = (elements.length > 0 && !full24[elements[0].index]._empty) ? 'pointer' : 'default';
         }
       }
     });
@@ -1311,8 +1333,8 @@ function renderHourlyChart() {
 }
 
 function openDrilldown(hourIndex) {
-  const h = window._hourlyData[hourIndex];
-  if (!h || !h.circuits) return;
+  const h = (window._hourlyFull24 || window._hourlyData)[hourIndex];
+  if (!h || !h.circuits || h._empty) return;
 
   const ampm = h.hour >= 12 ? 'PM' : 'AM';
   const hr = h.hour % 12 || 12;
@@ -1696,6 +1718,14 @@ function renderHistCircuitTable() {
       <td class="right mono" style="color:${peakColor}">${peakLabel}</td>
     </tr>`;
   }).join('');
+}
+
+function toggleOpportunities() {
+  const list = document.getElementById('opportunitiesList');
+  const chevron = document.getElementById('oppChevron');
+  const open = list.style.display !== 'none';
+  list.style.display = open ? 'none' : '';
+  chevron.style.transform = open ? '' : 'rotate(90deg)';
 }
 
 function renderOpportunities(opps) {
