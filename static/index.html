@@ -696,7 +696,7 @@ tr:last-child td { border-bottom: none; }
         <tr>
           <th class="sortable" data-sort="name" onclick="sortCircuits('name')">Circuit <span class="sort-arrow"></span></th>
           <th class="right sortable active" data-sort="watts" onclick="sortCircuits('watts')">Now <span class="sort-arrow">▼</span></th>
-          <th class="right sortable" data-sort="kwh" onclick="sortCircuits('kwh')">Today <span class="sort-arrow"></span></th>
+          <th class="right sortable" data-sort="kwh" onclick="sortCircuits('kwh')" id="circuitDayHeader">Today <span class="sort-arrow"></span></th>
           <th class="right sortable" data-sort="cost" onclick="sortCircuits('cost')">Cost <span class="sort-arrow"></span></th>
         </tr>
       </thead>
@@ -1068,6 +1068,13 @@ async function loadDay(which, btn) {
   if (btn) {
     btn.closest('.period-selector').querySelectorAll('button').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
+  }
+  // Update circuit table column header
+  const dayHeader = document.getElementById('circuitDayHeader');
+  if (dayHeader) {
+    const arrow = dayHeader.querySelector('.sort-arrow');
+    dayHeader.textContent = which === 'yesterday' ? 'Yesterday' : 'Today';
+    if (arrow) dayHeader.appendChild(arrow);
   }
   // Reset solar adjustment when switching days
   window._todayGridCost = null;
