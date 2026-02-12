@@ -616,12 +616,12 @@ tr:last-child td { border-bottom: none; }
 <!-- Stats -->
 <div class="stats-row">
   <div class="stat-card">
-    <div class="label">Today's Cost</div>
+    <div class="label" id="dayCostLabel">Today's Cost</div>
     <div class="value" id="todayCost">--</div>
     <div class="sub" id="todayCostSub"></div>
   </div>
   <div class="stat-card">
-    <div class="label">Today's Usage</div>
+    <div class="label" id="dayUsageLabel">Today's Usage</div>
     <div class="value" id="todayKwh">--</div>
     <div class="sub">kWh</div>
   </div>
@@ -1060,7 +1060,7 @@ function fmtWh(kwh) {
 window._selectedDay = 'today';
 
 async function loadToday() {
-  return loadDayData('today');
+  return loadDayData(window._selectedDay || 'today');
 }
 
 async function loadDay(which, btn) {
@@ -1091,7 +1091,10 @@ async function loadDayData(which) {
     if (d.error) return;
 
     const title = document.getElementById('hourlyTitle');
-    title.textContent = which === 'yesterday' ? 'Yesterday — Hourly' : 'Today — Hourly';
+    const isYesterday = which === 'yesterday';
+    title.textContent = isYesterday ? 'Yesterday — Hourly' : 'Today — Hourly';
+    document.getElementById('dayCostLabel').textContent = isYesterday ? "Yesterday's Cost" : "Today's Cost";
+    document.getElementById('dayUsageLabel').textContent = isYesterday ? "Yesterday's Usage" : "Today's Usage";
 
     // Store full-rate cost; will be updated by loadSolar with grid-only cost
     window._todayFullRateCost = d.total_cost;
