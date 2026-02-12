@@ -637,6 +637,30 @@ tr:last-child td { border-bottom: none; }
   </div>
 </div>
 
+<!-- Battery Economics (compact row) -->
+<div class="stats-row" id="batteryStatsRow" data-solar style="display:none;grid-template-columns:repeat(4,1fr)">
+  <div class="stat-card">
+    <div class="label">Battery Cost</div>
+    <div class="value" id="batCostPerKwh">--</div>
+    <div class="sub" id="batCostSub">per kWh discharged</div>
+  </div>
+  <div class="stat-card">
+    <div class="label">Charge Source</div>
+    <div class="value" style="color:var(--solar)" id="batSolarPct">--</div>
+    <div class="sub" id="batChargeSub">solar / grid split</div>
+  </div>
+  <div class="stat-card">
+    <div class="label">Round-Trip</div>
+    <div class="value" id="batEfficiency">--</div>
+    <div class="sub" id="batEffSub">efficiency</div>
+  </div>
+  <div class="stat-card">
+    <div class="label">Battery Savings</div>
+    <div class="value" style="color:var(--green)" id="batSavings">--</div>
+    <div class="sub" id="batSavingsSub">vs grid peak rate</div>
+  </div>
+</div>
+
 <!-- Insight Bar -->
 <div class="insight-bar" id="insightBar">
   <span class="insight-icon" id="insightIcon"></span>
@@ -684,10 +708,16 @@ tr:last-child td { border-bottom: none; }
 <!-- Hourly Cost Chart -->
 <div class="panel">
   <div class="panel-header">
-    <h2>Today — Hourly</h2>
-    <div class="period-selector" data-solar-toggle>
-      <button class="active" onclick="setHourlyView('cost', this)">Cost</button>
-      <button onclick="setHourlyView('source', this)">Source</button>
+    <h2 id="hourlyTitle">Today — Hourly</h2>
+    <div style="display:flex;gap:8px">
+      <div class="period-selector" id="daySelector">
+        <button class="active" onclick="loadDay('today', this)">Today</button>
+        <button onclick="loadDay('yesterday', this)">Yesterday</button>
+      </div>
+      <div class="period-selector" data-solar-toggle>
+        <button class="active" onclick="setHourlyView('cost', this)">Cost</button>
+        <button onclick="setHourlyView('source', this)">Source</button>
+      </div>
     </div>
   </div>
   <div class="panel-body">
@@ -1027,22 +1057,52 @@ function fmtWh(kwh) {
 // REST — Today's Data
 // ==========================================
 
+window._selectedDay = 'today';
+
 async function loadToday() {
+  return loadDayData('today');
+}
+
+async function loadDay(which, btn) {
+  window._selectedDay = which;
+  if (btn) {
+    btn.closest('.period-selector').querySelectorAll('button').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+  }
+  // Reset solar adjustment when switching days
+  window._todayGridCost = null;
+  await loadDayData(which);
+  // Re-apply solar adjustment for the new day
+  if (window._solarEnabled && window._todaySolarData) {
+    applyTodaySolarAdjustment();
+  }
+}
+
+async function loadDayData(which) {
   try {
-    const r = await fetch('/api/today');
+    let url = '/api/today';
+    if (which === 'yesterday') {
+      const y = new Date();
+      y.setDate(y.getDate() - 1);
+      url = '/api/today?date=' + localDateStr(y);
+    }
+    const r = await fetch(url);
     const d = await r.json();
     if (d.error) return;
+
+    const title = document.getElementById('hourlyTitle');
+    title.textContent = which === 'yesterday' ? 'Yesterday — Hourly' : 'Today — Hourly';
 
     // Store full-rate cost; will be updated by loadSolar with grid-only cost
     window._todayFullRateCost = d.total_cost;
     window._todayHourlyData = d.hourly;
+    window._todayDateStr = d.date;
 
     // Show full-rate cost initially (solar data may update this)
     if (!window._todayGridCost) {
       document.getElementById('todayCost').textContent = '$' + d.total_cost.toFixed(2);
       document.getElementById('todayCostSub').textContent = window._solarEnabled ? 'full rate (loading solar...)' : 'full rate';
     } else {
-      // Solar data already loaded, recalculate with fresh hourly data
       applyTodaySolarAdjustment();
     }
     document.getElementById('todayKwh').textContent = d.total_kwh.toFixed(1);
@@ -1054,45 +1114,52 @@ async function loadToday() {
     // Hourly chart
     updateHourlyChart(d.hourly);
   } catch (e) {
-    console.error('loadToday error:', e);
+    console.error('loadDayData error:', e);
   }
 }
 
 function applyTodaySolarAdjustment() {
-  // Use per-hour solar data to compute today's actual grid cost
+  // Use per-hour solar data to compute actual grid cost for the selected day
   const solar = window._todaySolarData;
   const hourly = window._todayHourlyData;
   if (!solar || !hourly) return;
 
-  const today = localDateStr();
+  const targetDate = window._todayDateStr || localDateStr();
   const solarByHour = {};
   if (solar.hourly) {
     solar.hourly.forEach(h => {
-      if (h.date === today) solarByHour[h.hour] = h;
+      if (h.date === targetDate) solarByHour[h.hour] = h;
     });
   }
 
   let gridCost = 0;
+  let batteryCost = 0;
   let fullCost = 0;
+  const batCostPerKwh = (solar.battery && solar.battery.cost_per_kwh) || 0;
+
   for (const h of hourly) {
     fullCost += h.cost;
     const sh = solarByHour[h.hour];
     if (sh) {
-      // Use actual HA battery discharge sensor
       const batteryKwh = sh.battery_discharge_kwh || 0;
       const totalSupply = sh.solar_kwh + sh.grid_import_kwh + batteryKwh;
       const gridFrac = totalSupply > 0 ? sh.grid_import_kwh / totalSupply : 1;
+      const batFrac = totalSupply > 0 ? batteryKwh / totalSupply : 0;
       gridCost += h.cost * gridFrac;
+      // Battery cost = battery fraction of consumption * battery_cost_per_kwh
+      batteryCost += h.kwh * batFrac * batCostPerKwh;
     } else {
       gridCost += h.cost;
     }
   }
 
-  window._todayGridCost = gridCost;
-  document.getElementById('todayCost').textContent = '$' + gridCost.toFixed(2);
-  const saved = fullCost - gridCost;
+  const actualCost = gridCost + batteryCost;
+  window._todayGridCost = actualCost;
+  document.getElementById('todayCost').textContent = '$' + actualCost.toFixed(2);
+  const saved = fullCost - actualCost;
+  const label = window._selectedDay === 'yesterday' ? 'yesterday' : 'today';
   document.getElementById('todayCostSub').textContent =
-    saved > 0.01 ? `grid only (full rate $${fullCost.toFixed(2)})` : 'grid cost';
+    saved > 0.01 ? `actual cost (full rate $${fullCost.toFixed(2)})` : 'actual cost';
 }
 
 // Store hourly data globally for drilldown
@@ -1101,7 +1168,7 @@ window._hourlyView = 'cost';
 window._solarData = null;
 
 function setHourlyView(view, btn) {
-  if (!window._solarEnabled && view === 'source') return; // No solar data available
+  if (!window._solarEnabled && view === 'source') return;
   window._hourlyView = view;
   if (btn) {
     btn.closest('.period-selector').querySelectorAll('button').forEach(b => b.classList.remove('active'));
@@ -1109,11 +1176,16 @@ function setHourlyView(view, btn) {
   }
   if (window._hourlyData.length) {
     if (view === 'source' && !window._solarData) {
-      // Fetch solar data on first source view
-      fetch('/api/solar?days=1').then(r => r.json()).then(d => {
-        if (!d.error) window._solarData = d;
+      // Use 7-day solar data (covers today + yesterday) or fetch if not loaded yet
+      if (window._todaySolarData) {
+        window._solarData = window._todaySolarData;
         renderHourlyChart();
-      });
+      } else {
+        fetch('/api/solar?days=7').then(r => r.json()).then(d => {
+          if (!d.error) window._solarData = d;
+          renderHourlyChart();
+        });
+      }
     } else {
       renderHourlyChart();
     }
@@ -1153,13 +1225,13 @@ function renderHourlyChart() {
 
   if (window._hourlyChart) window._hourlyChart.destroy();
 
-  // Build solar lookup for today (used by both source and cost views)
+  // Build solar lookup for selected day (used by both source and cost views)
   const solar = window._solarData;
   const solarByHour = {};
   if (solar && solar.hourly) {
-    const today = localDateStr();
+    const targetDate = window._todayDateStr || localDateStr();
     solar.hourly.forEach(h => {
-      if (h.date === today) solarByHour[h.hour] = h;
+      if (h.date === targetDate) solarByHour[h.hour] = h;
     });
   }
 
@@ -1617,7 +1689,7 @@ function updateHistCircuits(d) {
   const solar = window._histSolarData;
   let costLabel;
   if (solar && solar.net_cost !== undefined) {
-    costLabel = `${d.days}d total: ${d.total_kwh} kWh — $${solar.net_cost.toFixed(2)} grid cost ($${(solar.net_cost / d.days).toFixed(2)}/day)`;
+    costLabel = `${d.days}d total: ${d.total_kwh} kWh — $${solar.net_cost.toFixed(2)} actual ($${(solar.net_cost / d.days).toFixed(2)}/day)`;
   } else {
     costLabel = `${d.days}d total: ${d.total_kwh} kWh — $${d.total_cost.toFixed(2)} ($${(d.total_cost / d.days).toFixed(2)}/day)`;
   }
@@ -1637,8 +1709,9 @@ function updateHistCircuits(d) {
         if (sc.by_tou && sc.total_kwh > 0) {
           gridPeakPct = (sc.by_tou.peak.grid_kwh / sc.total_kwh) * 100;
         }
-        displayCost = sc.grid_cost;
-        displayDailyCost = sc.grid_cost / d.days;
+        // Use actual_cost (grid + battery) instead of grid-only
+        displayCost = sc.actual_cost !== undefined ? sc.actual_cost : sc.grid_cost;
+        displayDailyCost = displayCost / d.days;
       }
     }
     return {
@@ -1647,8 +1720,8 @@ function updateHistCircuits(d) {
       total_cost: displayCost,
       full_rate_cost: c.total_cost,
       avg_daily_cost: displayDailyCost,
-      peak_pct: peakPct,       // total peak usage (what circuit uses during 4-9pm)
-      grid_peak_pct: gridPeakPct,  // grid-only peak (what grid pays for during peak)
+      peak_pct: peakPct,
+      grid_peak_pct: gridPeakPct,
     };
   });
 
@@ -1661,7 +1734,7 @@ function updateHistCircuits(d) {
   const costHeader = document.getElementById('histCostHeader');
   if (costHeader) {
     const arrow = histSortKey === 'cost' ? (histSortDesc ? '▼' : '▲') : '';
-    costHeader.innerHTML = (hasSolar ? 'Grid Cost' : 'Cost') + ` <span class="sort-arrow">${arrow}</span>`;
+    costHeader.innerHTML = (hasSolar ? 'Actual Cost' : 'Cost') + ` <span class="sort-arrow">${arrow}</span>`;
   }
 
   renderHistCircuitTable();
@@ -1794,7 +1867,6 @@ async function loadSolar() {
     const r = await fetch('/api/solar?days=7');
     const d = await r.json();
     if (d.error) {
-      // Solar API failed — reset grid cost so WS can update
       window._todayGridCost = null;
       return;
     }
@@ -1803,14 +1875,48 @@ async function loadSolar() {
     const moEst = (d.solar_savings / d.days * 30).toFixed(0);
     document.getElementById('solarSavingsSub').textContent = `${d.days}-day total · ~$${moEst}/mo savings`;
 
-    // Self-sufficiency: fraction of consumption NOT from grid
-    // Guard: grid_import > consumption possible when battery charges from grid
+    // Self-sufficiency
     const consumption = d.consumption_kwh || 1;
     const selfSuff = ((consumption - d.grid_import_kwh) / consumption * 100);
     document.getElementById('selfSuff').textContent = Math.max(0, selfSuff).toFixed(0) + '%';
     document.getElementById('selfSuffSub').textContent = `${d.days}-day avg · non-grid`;
 
-    // Extract today's hourly data from the 7-day response to adjust Today's Cost
+    // Battery economics
+    if (d.battery) {
+      const bat = d.battery;
+      const row = document.getElementById('batteryStatsRow');
+      row.style.display = '';
+
+      // Cost per kWh
+      document.getElementById('batCostPerKwh').textContent = '$' + bat.cost_per_kwh.toFixed(3);
+      const gridRate = d.grid_cost / (d.grid_import_kwh || 1);
+      const discount = ((1 - bat.cost_per_kwh / gridRate) * 100);
+      document.getElementById('batCostSub').textContent =
+        bat.cost_per_kwh > 0.001
+          ? `${discount.toFixed(0)}% cheaper than grid avg`
+          : 'free (100% solar-charged)';
+
+      // Charge source
+      document.getElementById('batSolarPct').textContent = bat.solar_pct.toFixed(0) + '%';
+      document.getElementById('batChargeSub').textContent =
+        `☀ ${bat.solar_charge_kwh.toFixed(1)} kWh · ⏻ ${bat.grid_charge_kwh.toFixed(1)} kWh`;
+
+      // Efficiency
+      document.getElementById('batEfficiency').textContent = (bat.efficiency * 100).toFixed(0) + '%';
+      document.getElementById('batEffSub').textContent =
+        `${bat.charge_kwh.toFixed(1)} in → ${bat.discharge_kwh.toFixed(1)} out · ${bat.energy_lost_kwh.toFixed(1)} kWh lost`;
+
+      // Battery savings (what peak discharge would have cost at grid peak rate)
+      // Peak discharge cost avoided = peak_battery_discharge * peak_rate - actual battery cost during peak
+      const peakRate = 0.63; // Could pull from config, but hardcoded is fine for display
+      const peakBatDischarge = d.battery_discharge_kwh || bat.discharge_kwh;
+      const batSavingsVal = (peakBatDischarge * peakRate) - bat.total_battery_cost;
+      document.getElementById('batSavings').textContent = '$' + Math.max(0, batSavingsVal).toFixed(2);
+      document.getElementById('batSavingsSub').textContent =
+        `${d.days}d · battery vs grid rates`;
+    }
+
+    // Extract hourly data to adjust Today's Cost
     window._todaySolarData = d;
     applyTodaySolarAdjustment();
   } catch (e) {

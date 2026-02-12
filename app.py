@@ -169,32 +169,55 @@ async def fetch_ha_live():
     return current
 
 
-async def fetch_egauge_today():
-    """Fetch today's hourly data from eGauge."""
-    cached = cache.get("egauge_today", ttl_seconds=60)
+async def fetch_egauge_today(target_date=None):
+    """Fetch hourly data for today or a specific date from eGauge.
+
+    Args:
+        target_date: Optional date string 'YYYY-MM-DD'. None = today (with live partial hour).
+    """
+    now = datetime.now()
+    is_today = target_date is None or target_date == str(now.date())
+
+    cache_key = "egauge_today" if is_today else f"egauge_day_{target_date}"
+    ttl = 60 if is_today else 3600  # Cache historical days longer
+    cached = cache.get(cache_key, ttl_seconds=ttl)
     if cached:
         return cached
 
     import csv
     from io import StringIO
 
-    now = datetime.now()
-    hours_today = now.hour + 1  # Include current partial hour
-    n_rows = hours_today + 2  # eGauge returns n-1 data rows; need hours+1 for diffing
-
-    hourly_url = f"{EGAUGE_URL}/cgi-bin/egauge-show?c&h&n={n_rows}"
-    # Also fetch current cumulative reading for partial hour
-    # Use minute resolution (&m) to get the latest reading; default interval is daily
-    # eGauge returns n-1 data rows, so n=2 gives us 1 row
-    current_url = f"{EGAUGE_URL}/cgi-bin/egauge-show?c&m&n=2"
+    if is_today:
+        target_date_str = str(now.date())
+        hours_today = now.hour + 1
+        n_rows = hours_today + 2  # eGauge returns n-1 data rows; need hours+1 for diffing
+        hourly_url = f"{EGAUGE_URL}/cgi-bin/egauge-show?c&h&n={n_rows}"
+        # Also fetch current cumulative reading for partial hour
+        # Use minute resolution (&m) to get the latest reading; default interval is daily
+        # eGauge returns n-1 data rows, so n=2 gives us 1 row
+        current_url = f"{EGAUGE_URL}/cgi-bin/egauge-show?c&m&n=2"
+    else:
+        target_date_str = target_date
+        # Historical date: fetch 25 hourly rows covering the full day
+        # Use end-of-day timestamp as reference point, eGauge goes backwards from there
+        target = datetime.strptime(target_date_str, '%Y-%m-%d')
+        end_of_day = target.replace(hour=0, minute=0, second=0) + timedelta(days=1)
+        end_ts = int(end_of_day.timestamp())
+        n_rows = 26  # 25 diffs = 24 hours + 1 boundary
+        hourly_url = f"{EGAUGE_URL}/cgi-bin/egauge-show?c&h&t={end_ts}&n={n_rows}"
+        current_url = None  # No partial hour for historical dates
 
     async with httpx.AsyncClient() as client:
         for attempt in range(3):
             try:
-                hourly_resp, current_resp = await asyncio.gather(
-                    client.get(hourly_url, auth=(EGAUGE_USER, EGAUGE_PASSWORD), timeout=15),
-                    client.get(current_url, auth=(EGAUGE_USER, EGAUGE_PASSWORD), timeout=15),
-                )
+                if current_url:
+                    hourly_resp, current_resp = await asyncio.gather(
+                        client.get(hourly_url, auth=(EGAUGE_USER, EGAUGE_PASSWORD), timeout=15),
+                        client.get(current_url, auth=(EGAUGE_USER, EGAUGE_PASSWORD), timeout=15),
+                    )
+                else:
+                    hourly_resp = await client.get(hourly_url, auth=(EGAUGE_USER, EGAUGE_PASSWORD), timeout=15)
+                    current_resp = None
                 hourly_resp.raise_for_status()
                 break
             except httpx.HTTPError as e:
@@ -223,21 +246,21 @@ async def fetch_egauge_today():
     rows = parse_egauge_rows(hourly_resp.text)
     rows.sort(key=lambda x: x["datetime"])
 
-    # Append current reading for partial hour (if newer than last hourly boundary)
-    try:
-        current_rows = parse_egauge_rows(current_resp.text)
-        if current_rows and rows:
-            latest = current_rows[-1]
-            if latest["datetime"] > rows[-1]["datetime"]:
-                rows.append(latest)
-    except Exception as e:
-        print(f"Failed to append current reading for partial hour: {e}")
+    # Append current reading for partial hour (today only)
+    if is_today and current_resp:
+        try:
+            current_rows = parse_egauge_rows(current_resp.text)
+            if current_rows and rows:
+                latest = current_rows[-1]
+                if latest["datetime"] > rows[-1]["datetime"]:
+                    rows.append(latest)
+        except Exception as e:
+            print(f"Failed to append current reading for partial hour: {e}")
 
     # Diff consecutive rows for hourly consumption
     hourly = []
     for i in range(1, len(rows)):
         prev, curr = rows[i - 1], rows[i]
-        # Label by start of consumption period (not end)
         tou_period = get_tou_period(prev["hour"])
         entry = {
             "hour": prev["hour"],
@@ -257,17 +280,15 @@ async def fetch_egauge_today():
         entry["total_cost"] = sum(c["cost"] for c in entry["circuits"].values())
         hourly.append(entry)
 
-    # Build summary
-    today_str = str(now.date())
-    today_hours = [h for h in hourly if h.get("date") == today_str]
+    # Filter to target date only
+    day_hours = [h for h in hourly if h.get("date") == target_date_str]
 
     circuit_totals = defaultdict(lambda: {"kwh": 0, "cost": 0, "watts": 0})
     total_cost = 0
     total_kwh = 0
     hourly_costs = []
 
-    for h in today_hours:
-        # Include per-circuit breakdown for drilldown
+    for h in day_hours:
         hour_circuits = [
             {"name": name, "kwh": round(data["kwh"], 3), "cost": round(data["cost"], 3)}
             for name, data in sorted(h["circuits"].items(), key=lambda x: x[1]["cost"], reverse=True)
@@ -280,8 +301,8 @@ async def fetch_egauge_today():
             "kwh": round(h["total_kwh"], 2),
             "circuits": hour_circuits,
         }
-        # Mark current partial hour
-        if h["hour"] == now.hour and h["date"] == today_str:
+        # Mark current partial hour (today only)
+        if is_today and h["hour"] == now.hour and h["date"] == target_date_str:
             entry["partial"] = True
         hourly_costs.append(entry)
         total_cost += h["total_cost"]
@@ -291,7 +312,7 @@ async def fetch_egauge_today():
             circuit_totals[name]["cost"] += data["cost"]
 
     result = {
-        "date": today_str,
+        "date": target_date_str,
         "total_cost": round(total_cost, 2),
         "total_kwh": round(total_kwh, 2),
         "hourly": hourly_costs,
@@ -300,7 +321,7 @@ async def fetch_egauge_today():
             for name, d in sorted(circuit_totals.items(), key=lambda x: x[1]["cost"], reverse=True)
         ],
     }
-    cache.set("egauge_today", result)
+    cache.set(cache_key, result)
     return result
 
 
@@ -443,14 +464,17 @@ def _build_solar(days):
         return None
 
     circuits = []
-    for reg_name, stats in sorted(blended.items(), key=lambda x: x[1]["grid_cost"], reverse=True):
+    for reg_name, stats in sorted(blended.items(), key=lambda x: x[1]["actual_cost"], reverse=True):
         name = reg_name.replace(" [kWh]", "")
         circuits.append({
             "name": name,
             "total_kwh": round(stats["total_kwh"], 2),
             "grid_kwh": round(stats["grid_kwh"], 2),
             "solar_kwh": round(stats["solar_kwh"], 2),
+            "battery_kwh": round(stats["battery_kwh"], 2),
             "grid_cost": round(stats["grid_cost"], 2),
+            "battery_cost": round(stats["battery_cost"], 2),
+            "actual_cost": round(stats["actual_cost"], 2),
             "full_rate_cost": round(stats["full_rate_cost"], 2),
             "solar_savings": round(stats["solar_savings"], 2),
             "by_tou": {
@@ -478,7 +502,7 @@ def _build_solar(days):
 
     full_rate_cost = round(sum(c["full_rate_cost"] for c in circuits), 2)
     net_cost = round(system["net_cost"], 2)
-    return {
+    result = {
         "days": days,
         "solar_kwh": round(system["total_solar_kwh"], 2),
         "grid_import_kwh": round(system["total_grid_import_kwh"], 2),
@@ -495,6 +519,23 @@ def _build_solar(days):
         "circuits": circuits,
         "hourly": hourly_source,
     }
+
+    # Battery economics (from charge source attribution)
+    if system.get("battery_cost_per_kwh") is not None:
+        result["battery"] = {
+            "cost_per_kwh": round(system["battery_cost_per_kwh"], 4),
+            "solar_pct": system["battery_solar_pct"],
+            "solar_charge_kwh": system["battery_solar_charge_kwh"],
+            "grid_charge_kwh": system["battery_grid_charge_kwh"],
+            "grid_charge_cost": system["battery_grid_charge_cost"],
+            "discharge_kwh": round(system["total_battery_discharge_kwh"], 2),
+            "charge_kwh": round(system["total_battery_charge_kwh"], 2),
+            "efficiency": system["battery_efficiency_measured"],
+            "energy_lost_kwh": system["battery_energy_lost_kwh"],
+            "total_battery_cost": round(system.get("total_battery_cost", 0), 2),
+        }
+
+    return result
 
 
 # ==========================================
@@ -521,9 +562,13 @@ async def api_config():
 
 
 @app.get("/api/today")
-async def api_today():
-    """Today's running costs and circuit breakdown."""
-    data = await fetch_egauge_today()
+async def api_today(date: str = None):
+    """Today's (or a specific date's) running costs and circuit breakdown.
+
+    Args:
+        date: Optional 'YYYY-MM-DD'. None = today with live partial hour.
+    """
+    data = await fetch_egauge_today(target_date=date)
     if not data:
         return {"error": "Could not fetch data"}
     return data

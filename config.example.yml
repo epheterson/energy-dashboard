@@ -34,6 +34,7 @@ solar:
     grid_exported: "sensor.solar_power_plant_grid_exported"
     battery_charged: "sensor.solar_power_plant_battery_charged"
     battery_discharged: "sensor.solar_power_plant_battery_discharged"
+  battery_efficiency: 0.90  # Round-trip efficiency (Powerwall 2 ≈ 90%)
   export_credits:
     winter:
       peak: 0.16

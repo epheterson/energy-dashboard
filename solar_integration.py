@@ -271,47 +271,159 @@ def build_hourly_solar_data(days=7):
 # Blended Analysis
 # ==========================================
 
+def _get_battery_efficiency():
+    """Get battery round-trip efficiency from config."""
+    cfg = get_config()
+    return cfg.get('solar', {}).get('battery_efficiency', 0.90)
+
+
+def _compute_battery_charge_source(solar_kwh, grid_import_kwh, grid_export_kwh,
+                                   battery_charge_kwh, battery_discharge_kwh):
+    """
+    Determine how much of battery charge came from solar vs grid.
+
+    Powerwall strategy: solar serves home first, then charges battery,
+    then exports surplus. Grid only charges battery when solar can't cover it
+    (e.g., off-peak grid charging for peak arbitrage).
+
+    Returns (solar_to_battery, grid_to_battery) in kWh.
+    """
+    if battery_charge_kwh <= 0:
+        return 0, 0
+
+    # Solar used on-site (not exported) = total solar - exports
+    solar_local = max(0, solar_kwh - grid_export_kwh)
+
+    # Home load (from energy balance)
+    # supply_to_home = solar_local + grid_import + battery_discharge
+    # but battery_charge is a separate load alongside home
+    home_load = max(0, solar_local + grid_import_kwh + battery_discharge_kwh - battery_charge_kwh)
+
+    # Solar serves home first (Powerwall priority)
+    solar_to_home = min(solar_local, home_load)
+    solar_surplus = max(0, solar_local - solar_to_home)
+
+    # Surplus solar goes to battery
+    solar_to_battery = min(solar_surplus, battery_charge_kwh)
+    grid_to_battery = max(0, battery_charge_kwh - solar_to_battery)
+
+    return solar_to_battery, grid_to_battery
+
+
 def blend_egauge_with_solar(egauge_hourly, solar_hourly):
     """
     Blend eGauge circuit data with solar/grid source data.
 
-    For each hour, uses the source mix to determine what fraction
-    of each circuit's consumption was paid for (grid) vs free (solar).
+    Two-pass approach:
+      Pass 1: Compute battery charge source attribution and battery_cost_per_kwh
+      Pass 2: Apply source mix + battery cost to per-circuit consumption
 
-    Returns enhanced register stats with actual_cost (grid-only).
+    Returns enhanced register stats with actual_cost accounting for battery.
     """
     if not solar_hourly:
         return None
 
+    battery_efficiency = _get_battery_efficiency()
+
+    # ── Pass 1: Battery economics ──
+    # Accumulate battery charge costs to derive battery_cost_per_kwh
+    total_solar_to_battery = 0
+    total_grid_to_battery = 0
+    total_grid_charge_cost = 0
+    total_charge_kwh = 0
+    total_discharge_kwh = 0
+
+    for hour_data in egauge_hourly:
+        date_str = str(hour_data['date'])
+        hour = hour_data['hour']
+        hour_key = (date_str, hour)
+        tou_period = hour_data['tou_period']
+        dt = hour_data['datetime']
+        rate = get_rate(dt, tou_period)
+
+        solar_data = solar_hourly.get(hour_key)
+        if not solar_data:
+            continue
+
+        s = solar_data
+        solar_kwh = s.get('solar_kwh', 0)
+        grid_import_kwh = s.get('grid_import_kwh', 0)
+        grid_export_kwh = s.get('grid_export_kwh', 0)
+        battery_charge_kwh = s.get('battery_charge_kwh', 0)
+        battery_discharge_kwh = s.get('battery_discharge_kwh', 0)
+
+        total_charge_kwh += battery_charge_kwh
+        total_discharge_kwh += battery_discharge_kwh
+
+        if battery_charge_kwh > 0:
+            stb, gtb = _compute_battery_charge_source(
+                solar_kwh, grid_import_kwh, grid_export_kwh,
+                battery_charge_kwh, battery_discharge_kwh
+            )
+            total_solar_to_battery += stb
+            total_grid_to_battery += gtb
+            total_grid_charge_cost += gtb * rate
+
+    # Battery cost per kWh discharged
+    # Efficiency is naturally captured: less comes out than goes in,
+    # so the per-kWh-out cost is higher than the per-kWh-in cost
+    if total_discharge_kwh > 0:
+        battery_cost_per_kwh = total_grid_charge_cost / total_discharge_kwh
+    else:
+        battery_cost_per_kwh = 0
+
+    # Measured efficiency (should be ~0.90 for Powerwall 2)
+    measured_efficiency = (total_discharge_kwh / total_charge_kwh) if total_charge_kwh > 0 else 0
+
+    # Battery solar percentage
+    battery_solar_pct = (total_solar_to_battery / total_charge_kwh * 100) if total_charge_kwh > 0 else 0
+
+    print(f"  Battery: {total_charge_kwh:.1f} kWh in → {total_discharge_kwh:.1f} kWh out "
+          f"({measured_efficiency:.0%} eff), {battery_solar_pct:.0f}% solar-charged, "
+          f"${battery_cost_per_kwh:.3f}/kWh discharge cost")
+
+    # ── Pass 2: Per-circuit cost attribution ──
     register_stats = defaultdict(lambda: {
         'total_kwh': 0,
         'grid_kwh': 0,
         'solar_kwh': 0,
-        'grid_cost': 0,  # Actual cost (only grid imports)
-        'full_rate_cost': 0,  # What it would cost without solar
+        'battery_kwh': 0,
+        'grid_cost': 0,
+        'battery_cost': 0,
+        'actual_cost': 0,  # grid_cost + battery_cost
+        'full_rate_cost': 0,
         'solar_savings': 0,
         'by_tou': {
-            'peak': {'kwh': 0, 'grid_kwh': 0, 'solar_kwh': 0, 'grid_cost': 0, 'full_cost': 0},
-            'part_peak': {'kwh': 0, 'grid_kwh': 0, 'solar_kwh': 0, 'grid_cost': 0, 'full_cost': 0},
-            'off_peak': {'kwh': 0, 'grid_kwh': 0, 'solar_kwh': 0, 'grid_cost': 0, 'full_cost': 0},
+            'peak': {'kwh': 0, 'grid_kwh': 0, 'solar_kwh': 0, 'battery_kwh': 0, 'grid_cost': 0, 'battery_cost': 0, 'full_cost': 0},
+            'part_peak': {'kwh': 0, 'grid_kwh': 0, 'solar_kwh': 0, 'battery_kwh': 0, 'grid_cost': 0, 'battery_cost': 0, 'full_cost': 0},
+            'off_peak': {'kwh': 0, 'grid_kwh': 0, 'solar_kwh': 0, 'battery_kwh': 0, 'grid_cost': 0, 'battery_cost': 0, 'full_cost': 0},
         },
     })
 
-    # Also track system-level totals
     system = {
         'total_solar_kwh': 0,
         'total_grid_import_kwh': 0,
         'total_grid_export_kwh': 0,
-        'total_battery_charge_kwh': 0,
-        'total_battery_discharge_kwh': 0,
+        'total_battery_charge_kwh': total_charge_kwh,
+        'total_battery_discharge_kwh': total_discharge_kwh,
         'total_consumption_kwh': 0,
         'total_grid_cost': 0,
+        'total_battery_cost': 0,
         'total_export_credit': 0,
         'net_cost': 0,
+        # Battery economics
+        'battery_cost_per_kwh': battery_cost_per_kwh,
+        'battery_solar_pct': round(battery_solar_pct, 1),
+        'battery_solar_charge_kwh': round(total_solar_to_battery, 2),
+        'battery_grid_charge_kwh': round(total_grid_to_battery, 2),
+        'battery_grid_charge_cost': round(total_grid_charge_cost, 2),
+        'battery_efficiency_measured': round(measured_efficiency, 3),
+        'battery_efficiency_config': battery_efficiency,
+        'battery_energy_lost_kwh': round(total_charge_kwh - total_discharge_kwh, 2),
         'by_tou': {
-            'peak': {'solar': 0, 'grid_import': 0, 'grid_export': 0, 'battery_discharge': 0, 'consumption': 0, 'grid_cost': 0, 'export_credit': 0},
-            'part_peak': {'solar': 0, 'grid_import': 0, 'grid_export': 0, 'battery_discharge': 0, 'consumption': 0, 'grid_cost': 0, 'export_credit': 0},
-            'off_peak': {'solar': 0, 'grid_import': 0, 'grid_export': 0, 'battery_discharge': 0, 'consumption': 0, 'grid_cost': 0, 'export_credit': 0},
+            'peak': {'solar': 0, 'grid_import': 0, 'grid_export': 0, 'battery_discharge': 0, 'consumption': 0, 'grid_cost': 0, 'battery_cost': 0, 'export_credit': 0},
+            'part_peak': {'solar': 0, 'grid_import': 0, 'grid_export': 0, 'battery_discharge': 0, 'consumption': 0, 'grid_cost': 0, 'battery_cost': 0, 'export_credit': 0},
+            'off_peak': {'solar': 0, 'grid_import': 0, 'grid_export': 0, 'battery_discharge': 0, 'consumption': 0, 'grid_cost': 0, 'battery_cost': 0, 'export_credit': 0},
         },
     }
 
@@ -327,7 +439,6 @@ def blend_egauge_with_solar(egauge_hourly, solar_hourly):
         rate = get_rate(dt, tou_period)
         export_credit = get_export_credit(dt, tou_period)
 
-        # Get Powerwall data for this hour
         solar_data = solar_hourly.get(hour_key)
         if solar_data:
             matched_hours += 1
@@ -339,9 +450,7 @@ def blend_egauge_with_solar(egauge_hourly, solar_hourly):
             battery_charge_kwh = s.get('battery_charge_kwh', 0)
             battery_discharge_kwh = s.get('battery_discharge_kwh', 0)
 
-            # 3-way source mix using actual HA battery discharge sensor.
-            # Solar, grid import, and battery discharge are the three sources
-            # that supply home consumption. Battery charge is a load, not a source.
+            # 3-way source mix: solar, grid, battery → home consumption
             total_supply = solar_kwh + grid_import_kwh + battery_discharge_kwh
             if total_supply > 0:
                 source_mix = {
@@ -356,13 +465,13 @@ def blend_egauge_with_solar(egauge_hourly, solar_hourly):
             system['total_solar_kwh'] += solar_kwh
             system['total_grid_import_kwh'] += grid_import_kwh
             system['total_grid_export_kwh'] += grid_export_kwh
-            system['total_battery_charge_kwh'] += battery_charge_kwh
-            system['total_battery_discharge_kwh'] += battery_discharge_kwh
 
             grid_import_cost = grid_import_kwh * rate
+            battery_discharge_cost = battery_discharge_kwh * battery_cost_per_kwh
             export_earn = grid_export_kwh * export_credit
 
             system['total_grid_cost'] += grid_import_cost
+            system['total_battery_cost'] += battery_discharge_cost
             system['total_export_credit'] += export_earn
 
             system['by_tou'][tou_period]['solar'] += solar_kwh
@@ -370,44 +479,52 @@ def blend_egauge_with_solar(egauge_hourly, solar_hourly):
             system['by_tou'][tou_period]['grid_export'] += grid_export_kwh
             system['by_tou'][tou_period]['battery_discharge'] += battery_discharge_kwh
             system['by_tou'][tou_period]['grid_cost'] += grid_import_cost
+            system['by_tou'][tou_period]['battery_cost'] += battery_discharge_cost
             system['by_tou'][tou_period]['export_credit'] += export_earn
         else:
             source_mix = {'solar': 0, 'grid': 1.0, 'battery': 0}
             unmatched_hours += 1
 
-        # Apply source mix to each circuit
+        # Apply source mix + battery cost to each circuit
         for key, kwh in hour_data.items():
             if not isinstance(key, str) or not key.endswith('[kWh]'):
                 continue
 
             grid_fraction = source_mix.get('grid', 1.0)
             solar_fraction = source_mix.get('solar', 0)
-            # Battery-powered consumption has $0 grid cost (already paid to charge)
+            battery_fraction = source_mix.get('battery', 0)
 
             circuit_grid_kwh = kwh * grid_fraction
             circuit_solar_kwh = kwh * solar_fraction
+            circuit_battery_kwh = kwh * battery_fraction
             grid_cost = circuit_grid_kwh * rate
+            bat_cost = circuit_battery_kwh * battery_cost_per_kwh
             full_cost = kwh * rate
 
             stats = register_stats[key]
             stats['total_kwh'] += kwh
             stats['grid_kwh'] += circuit_grid_kwh
             stats['solar_kwh'] += circuit_solar_kwh
+            stats['battery_kwh'] += circuit_battery_kwh
             stats['grid_cost'] += grid_cost
+            stats['battery_cost'] += bat_cost
+            stats['actual_cost'] += grid_cost + bat_cost
             stats['full_rate_cost'] += full_cost
-            stats['solar_savings'] += full_cost - grid_cost
+            stats['solar_savings'] += full_cost - (grid_cost + bat_cost)
 
             tou = stats['by_tou'][tou_period]
             tou['kwh'] += kwh
             tou['grid_kwh'] += circuit_grid_kwh
             tou['solar_kwh'] += circuit_solar_kwh
+            tou['battery_kwh'] += circuit_battery_kwh
             tou['grid_cost'] += grid_cost
+            tou['battery_cost'] += bat_cost
             tou['full_cost'] += full_cost
 
             system['total_consumption_kwh'] += kwh
             system['by_tou'][tou_period]['consumption'] += kwh
 
-    system['net_cost'] = system['total_grid_cost'] - system['total_export_credit']
+    system['net_cost'] = system['total_grid_cost'] + system['total_battery_cost'] - system['total_export_credit']
 
     if matched_hours + unmatched_hours > 0:
         print(f"  Solar data matched: {matched_hours}/{matched_hours + unmatched_hours} hours")
