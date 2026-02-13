@@ -570,10 +570,23 @@ tr:last-child td { border-bottom: none; }
 /* ---- Responsive ---- */
 
 @media (max-width: 768px) {
-  .power-flow { grid-template-columns: 1fr 1fr; }
-  .stats-row { grid-template-columns: 1fr 1fr; }
+  .container { padding: 12px; }
+  .power-flow { grid-template-columns: 1fr 1fr; gap: 10px; }
+  .stats-row { grid-template-columns: 1fr 1fr !important; gap: 10px; }
+  .flow-card { padding: 14px; }
   .flow-card .value { font-size: 24px; }
+  .stat-card { padding: 12px 14px; }
+  .stat-card .value { font-size: 24px; }
+  .stat-card .label { font-size: 11px; }
   .state-badge { display: none; }
+  .panel-header { padding: 12px 14px; flex-wrap: wrap; gap: 8px; }
+  .panel-header h2 { font-size: 13px; }
+  .panel-body { padding: 14px; }
+  .period-selector button { padding: 5px 10px; font-size: 12px; }
+  table.compact td { padding: 6px 8px; font-size: 12px; }
+  table.compact th { padding: 6px 8px; font-size: 10px; }
+  th { padding: 6px 8px; font-size: 10px; }
+  td { padding: 8px; }
 }
 </style>
 </head>
@@ -638,7 +651,7 @@ tr:last-child td { border-bottom: none; }
 </div>
 
 <!-- Battery Economics (compact row) -->
-<div class="stats-row" id="batteryStatsRow" data-solar style="display:none;grid-template-columns:repeat(4,1fr)">
+<div class="stats-row" id="batteryStatsRow" data-solar style="display:none">
   <div class="stat-card">
     <div class="label">Battery Cost</div>
     <div class="value" id="batCostPerKwh">--</div>
