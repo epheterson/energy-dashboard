@@ -1,6 +1,8 @@
 # Energy Dashboard
 
-Real-time energy monitoring dashboard for [eGauge](https://www.egauge.net/) meters. Tracks per-circuit power consumption, calculates costs by TOU (Time-of-Use) period, and optionally integrates with Home Assistant for solar/battery source tracking.
+Real-time home energy monitoring dashboard built around [eGauge](https://www.egauge.net/) circuit monitors and [Tesla Powerwall](https://www.tesla.com/powerwall) via Home Assistant. Tracks per-circuit power consumption, calculates costs by TOU (Time-of-Use) period, and provides full solar/battery/grid source attribution.
+
+Works great without solar too — set `solar.enabled: false` for a grid-only cost tracking dashboard.
 
 ![Dashboard Screenshot](https://img.shields.io/badge/status-active-green)
 
@@ -10,9 +12,10 @@ Real-time energy monitoring dashboard for [eGauge](https://www.egauge.net/) mete
 - **TOU Cost Tracking** — Automatic rate calculation based on your utility's peak/off-peak schedule
 - **Hourly & Historical Charts** — Stacked bar charts by TOU period with click-to-drilldown
 - **Circuit Breakdown** — Sortable table with today's kWh and cost per circuit
+- **Solar + Battery Tracking** — Live solar generation, battery charge/discharge, grid import/export via Home Assistant + Tesla Powerwall
+- **Battery Economics** — Cost per kWh, charge source breakdown (solar vs grid), round-trip efficiency, savings vs peak rates
 - **Optimization Opportunities** — Identifies circuits with high peak usage and potential savings
 - **Weekly Email Reports** — Automated Monday morning cost summaries
-- **Solar + Battery Integration** (optional) — Home Assistant Powerwall data for 3-way source attribution (solar/battery/grid)
 
 ## Quick Start
 
@@ -51,17 +54,17 @@ Contains credentials (never committed to git):
 | `EMAIL_ENABLED` | No | Set `true` for weekly email reports |
 | `SMTP_*` | If email | SMTP server settings |
 
-## Solar Integration
+## Solar + Battery Integration
 
-When `solar.enabled: true` in config.yml, the dashboard:
+Designed around the Tesla Powerwall + Home Assistant integration. When `solar.enabled: true` in config.yml, the dashboard pulls real-time data from HA sensors:
 
-- Shows live solar generation, battery state, and grid flow
-- Calculates actual grid cost (vs full-rate cost without solar)
-- Displays source mix bars (solar/battery/grid) per circuit
-- Tracks savings and self-sufficiency percentage
-- Includes solar data in weekly email reports
+- **Live power flow** — Solar generation, battery charge/discharge rate, grid import/export
+- **Source attribution** — Per-hour and per-circuit breakdown of solar vs battery vs grid
+- **Battery economics** — Cost per kWh stored, charge source (solar vs grid), round-trip efficiency
+- **Savings tracking** — Dollar savings from solar + battery vs full grid rates, self-sufficiency %
+- **Weekly reports** — Email summaries include solar/battery data
 
-When disabled, all solar UI elements are hidden and no Home Assistant calls are made.
+When `solar.enabled: false`, all solar/battery UI is cleanly hidden — you get a pure grid cost tracking dashboard with no Home Assistant dependency.
 
 ## Architecture
 
