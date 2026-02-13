@@ -93,7 +93,7 @@ header h1 {
 .no-solar .flow-card.solar,
 .no-solar .flow-card.battery,
 .no-solar #gridDir,
-.no-solar .stat-card[data-solar],
+.no-solar [data-solar],
 .no-solar .source-legend,
 .no-solar .source-col,
 .no-solar [data-solar-toggle] { display: none !important; }
@@ -816,6 +816,16 @@ tr:last-child td { border-bottom: none; }
 
 <script>
 // ==========================================
+// Constants
+// ==========================================
+
+const PEAK_RATE = 0.63;           // $/kWh peak rate for battery comparison
+const BATTERY_IDLE_W = 50;        // Watts threshold for charging/discharging label
+const SOLAR_REFRESH_MS = 1800000; // 30 min solar data refresh
+const TODAY_REFRESH_MS = 60000;   // 1 min today data refresh
+const WS_RECONNECT_MS = 3000;    // WebSocket reconnect delay
+
+// ==========================================
 // WebSocket — Live Data
 // ==========================================
 
@@ -841,7 +851,7 @@ function connect() {
   ws.onclose = () => {
     document.getElementById('statusDot').classList.add('disconnected');
     document.getElementById('lastUpdate').textContent = 'Reconnecting...';
-    reconnectTimer = setTimeout(connect, 3000);
+    reconnectTimer = setTimeout(connect, WS_RECONNECT_MS);
   };
   ws.onerror = () => ws.close();
 }
@@ -878,7 +888,7 @@ function updateLive(d) {
 
   // Battery direction (positive = discharging to home, negative = charging)
   const batCard = document.getElementById('batteryCard');
-  batCard.querySelector('.label').textContent = d.battery_w > 50 ? 'Battery ↓ Discharging' : d.battery_w < -50 ? 'Battery ↑ Charging' : 'Battery — Idle';
+  batCard.querySelector('.label').textContent = d.battery_w > BATTERY_IDLE_W ? 'Battery ↓ Discharging' : d.battery_w < -BATTERY_IDLE_W ? 'Battery ↑ Charging' : 'Battery — Idle';
 
   // Grid direction
   const gridCard = document.getElementById('gridCard');
@@ -927,7 +937,7 @@ function updateSystemState(d) {
     if (period === 'peak') { state = 'grid_peak'; cls = 'bad'; label = 'Grid Peak!'; }
     else if (period === 'part_peak') { state = 'grid_pp'; cls = 'caution'; label = 'Grid Part-Peak'; }
     else { state = 'grid_op'; cls = 'good'; label = 'Grid Off-Peak'; }
-  } else if (d.battery_w < -50) {
+  } else if (d.battery_w < -BATTERY_IDLE_W) {
     state = 'charging'; cls = 'good'; label = 'Battery Charging';
   } else {
     state = 'mixed'; cls = 'good'; label = 'Mixed Sources';
@@ -1912,10 +1922,9 @@ async function loadSolar() {
 
       // Cost per kWh — compare to peak rate (battery displaces peak/part-peak grid usage)
       document.getElementById('batCostPerKwh').textContent = '$' + bat.cost_per_kwh.toFixed(3);
-      const peakRate = 0.63;
       if (bat.cost_per_kwh > 0.001) {
-        const vsPeak = ((1 - bat.cost_per_kwh / peakRate) * 100);
-        document.getElementById('batCostSub').textContent = `${vsPeak.toFixed(0)}% cheaper than peak ($${peakRate.toFixed(2)})`;
+        const vsPeak = ((1 - bat.cost_per_kwh / PEAK_RATE) * 100);
+        document.getElementById('batCostSub').textContent = `${vsPeak.toFixed(0)}% cheaper than peak ($${PEAK_RATE.toFixed(2)})`;
       } else {
         document.getElementById('batCostSub').textContent = 'free (100% solar-charged)';
       }
@@ -1963,7 +1972,9 @@ async function init() {
       document.body.classList.add('no-solar');
     }
   } catch (e) {
-    console.error('Config fetch failed, assuming solar enabled:', e);
+    console.error('Config fetch failed, defaulting to grid-only mode:', e);
+    window._solarEnabled = false;
+    document.body.classList.add('no-solar');
   }
 
   connect();
@@ -1972,13 +1983,13 @@ async function init() {
 
   if (window._solarEnabled) {
     loadSolar();
-    setInterval(loadSolar, 1800000);
+    setInterval(loadSolar, SOLAR_REFRESH_MS);
   } else {
     // No solar — show full-rate cost directly
     document.getElementById('todayCostSub').textContent = 'full rate';
   }
 
-  setInterval(loadToday, 60000);
+  setInterval(loadToday, TODAY_REFRESH_MS);
 }
 
 init();
