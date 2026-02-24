@@ -199,89 +199,104 @@ header h1 {
   margin-top: 2px;
 }
 
-/* ---- EV Cards ---- */
+/* ---- EV Bar (compact) ---- */
 
-.ev-vehicle-row {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px;
-  margin-bottom: 24px;
-}
-
-.ev-card {
+.ev-bar {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 12px;
-  padding: 20px;
+  padding: 14px 20px;
+  margin-bottom: 24px;
 }
 
-.ev-card .ev-header {
+.ev-bar-summary {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  margin-bottom: 16px;
+  gap: 20px;
+  font-size: 13px;
+  flex-wrap: wrap;
 }
 
-.ev-card .ev-name {
-  font-size: 14px;
+.ev-bar-summary .ev-label {
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-.ev-charging-badge {
   font-size: 11px;
-  font-weight: 600;
-  padding: 2px 8px;
-  border-radius: 10px;
-  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--text-muted);
+  flex-shrink: 0;
 }
-.ev-charging-badge.charging { background: rgba(34,197,94,0.15); color: var(--green); }
-.ev-charging-badge.idle { background: rgba(139,143,163,0.1); color: var(--text-muted); }
 
-.ev-metrics {
+.ev-bar-summary .ev-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ev-bar-summary .ev-val {
+  font-weight: 700;
+  font-size: 14px;
+}
+
+.ev-bar-summary .ev-sub {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.ev-bar-summary .ev-sep {
+  color: var(--border);
+  font-size: 16px;
+}
+
+.ev-bar-detail {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
+  grid-template-columns: 1fr 1fr;
   gap: 12px;
 }
 
-.ev-metric .label {
-  font-size: 11px;
-  color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
+.ev-vehicle-mini {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
-.ev-metric .value {
-  font-size: 22px;
-  font-weight: 700;
-  margin-top: 2px;
+.ev-vehicle-mini .ev-vname {
+  font-weight: 600;
+  font-size: 12px;
+  min-width: 40px;
 }
 
-.ev-metric .sub {
-  font-size: 11px;
-  color: var(--text-muted);
-  margin-top: 1px;
-}
-
-.ev-soc-bar {
-  width: 100%;
+.ev-vehicle-mini .ev-soc-mini {
+  width: 60px;
   height: 6px;
   background: var(--surface-2);
   border-radius: 3px;
-  margin-top: 16px;
   overflow: hidden;
+  flex-shrink: 0;
 }
 
-.ev-soc-bar .fill {
+.ev-vehicle-mini .ev-soc-mini .fill {
   height: 100%;
   border-radius: 3px;
   background: var(--green);
   transition: width 1s ease;
 }
 
+.ev-vehicle-mini .ev-vstatus {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.ev-charging-active {
+  color: var(--green);
+  font-weight: 600;
+}
+
 @media (max-width: 768px) {
-  .ev-vehicle-row { grid-template-columns: 1fr; }
+  .ev-bar-summary { gap: 12px; }
+  .ev-bar-detail { grid-template-columns: 1fr; }
 }
 
 /* ---- Panels ---- */
@@ -762,30 +777,10 @@ tr:last-child td { border-bottom: none; }
   </div>
 </div>
 
-<!-- EV Charging -->
-<div class="ev-vehicle-row" id="evRow" data-ev style="display:none"></div>
-
-<div class="stats-row" data-ev id="evSummaryRow" style="display:none">
-  <div class="stat-card">
-    <div class="label">EV Cost / Mile</div>
-    <div class="value" style="color:var(--green)" id="evCostPerMile">--</div>
-    <div class="sub" id="evCostPerMileSub">at current rate</div>
-  </div>
-  <div class="stat-card">
-    <div class="label">Gas Equivalent</div>
-    <div class="value" style="color:var(--text-muted)" id="evGasCost">--</div>
-    <div class="sub" id="evGasSub">per mile @ $4.50/gal</div>
-  </div>
-  <div class="stat-card">
-    <div class="label">EV Savings</div>
-    <div class="value" style="color:var(--green)" id="evSavings">--</div>
-    <div class="sub" id="evSavingsSub">vs gas</div>
-  </div>
-  <div class="stat-card">
-    <div class="label">7-Day Charging</div>
-    <div class="value" id="evWeekCost">--</div>
-    <div class="sub" id="evWeekSub">total cost</div>
-  </div>
+<!-- EV Charging — compact bar, expands when charging -->
+<div class="ev-bar" id="evBar" data-ev style="display:none">
+  <div class="ev-bar-summary" id="evBarSummary"></div>
+  <div class="ev-bar-detail" id="evBarDetail" style="display:none"></div>
 </div>
 
 <!-- Insight Bar -->
@@ -2083,57 +2078,72 @@ async function loadSolar() {
 function updateEV(evData) {
   if (!evData || !window._evEnabled) return;
 
-  const row = document.getElementById('evRow');
-  const summaryRow = document.getElementById('evSummaryRow');
+  const bar = document.getElementById('evBar');
+  const summary = document.getElementById('evBarSummary');
+  const detail = document.getElementById('evBarDetail');
   const vehicles = Object.values(evData);
   if (!vehicles.length) return;
 
-  row.style.display = '';
-  summaryRow.style.display = '';
+  bar.style.display = '';
 
-  // Render per-vehicle cards
-  row.innerHTML = vehicles.map(v => {
-    const charging = v.is_charging;
-    const badgeCls = charging ? 'charging' : 'idle';
-    const badgeText = charging ? `⚡ ${v.charger_power_kw} kW` : (v.charging_state || 'Idle');
-    const battPct = v.battery_level != null ? v.battery_level.toFixed(0) : '--';
-    const range = v.battery_range != null ? v.battery_range.toFixed(0) : '--';
-    const costMile = v.cost_per_mile != null ? '$' + v.cost_per_mile.toFixed(3) : '--';
+  const anyCharging = vehicles.some(v => v.is_charging);
 
-    return `<div class="ev-card">
-      <div class="ev-header">
-        <span class="ev-name">${v.name}</span>
-        <span class="ev-charging-badge ${badgeCls}">${badgeText}</span>
-      </div>
-      <div class="ev-metrics">
-        <div class="ev-metric">
-          <div class="label">Battery</div>
-          <div class="value" style="color:${battPct > 50 ? 'var(--green)' : battPct > 20 ? 'var(--yellow)' : 'var(--red)'}">${battPct}%</div>
-          <div class="sub">${range} mi range</div>
-        </div>
-        <div class="ev-metric">
-          <div class="label">Cost/Mile</div>
-          <div class="value" style="color:var(--green)">${costMile}</div>
-          <div class="sub">${v.current_tou.replace('_', '-')} rate</div>
-        </div>
-        <div class="ev-metric">
-          <div class="label">Efficiency</div>
-          <div class="value">${v.efficiency_mi_per_kwh}</div>
-          <div class="sub">mi/kWh</div>
-        </div>
-      </div>
-      <div class="ev-soc-bar"><div class="fill" style="width:${battPct}%"></div></div>
-    </div>`;
-  }).join('');
+  // Build compact summary line using actual costs from history (set by loadEVHistory)
+  const hist = window._evHistory;
+  let items = [];
+  items.push('<span class="ev-label">EV</span>');
 
-  // Summary row — aggregate across vehicles
-  const first = vehicles[0];
-  if (first) {
-    document.getElementById('evCostPerMile').textContent = '$' + first.cost_per_mile.toFixed(3);
-    document.getElementById('evCostPerMileSub').textContent = `${first.current_tou.replace('_', '-')} · $${first.current_rate.toFixed(2)}/kWh`;
-    document.getElementById('evGasCost').textContent = '$' + first.gas_cost_per_mile.toFixed(3);
-    document.getElementById('evSavings').textContent = first.savings_vs_gas_pct + '%';
-    document.getElementById('evSavingsSub').textContent = 'cheaper than gas';
+  // Per-vehicle: name + battery%
+  vehicles.forEach(v => {
+    const pct = v.battery_level != null ? v.battery_level.toFixed(0) : '--';
+    const color = pct > 50 ? 'var(--green)' : pct > 20 ? 'var(--yellow)' : 'var(--red)';
+    let status = `<span class="ev-val" style="color:${color}">${pct}%</span>`;
+    if (v.is_charging) {
+      status += ` <span class="ev-charging-active">⚡ ${v.charger_power_kw} kW</span>`;
+    }
+    items.push(`<span class="ev-item">${v.name} ${status}</span>`);
+  });
+
+  items.push('<span class="ev-sep">|</span>');
+
+  // Actual cost/mile from history (not current TOU rate)
+  if (hist && hist.totals && hist.totals.total_miles_equivalent > 0) {
+    const actualCostPerMile = hist.totals.total_cost / hist.totals.total_miles_equivalent;
+    const gasCostPerMile = hist.totals.gas_equivalent_cost / hist.totals.total_miles_equivalent;
+    const savingsPct = ((1 - actualCostPerMile / gasCostPerMile) * 100).toFixed(0);
+    items.push(`<span class="ev-item"><span class="ev-val" style="color:var(--green)">$${actualCostPerMile.toFixed(3)}</span><span class="ev-sub">/mi actual</span></span>`);
+    items.push(`<span class="ev-item"><span class="ev-val" style="color:var(--text-muted)">$${gasCostPerMile.toFixed(3)}</span><span class="ev-sub">/mi gas</span></span>`);
+    items.push(`<span class="ev-item"><span class="ev-val" style="color:var(--green)">${savingsPct}%</span><span class="ev-sub">cheaper</span></span>`);
+    items.push('<span class="ev-sep">|</span>');
+    items.push(`<span class="ev-item"><span class="ev-val">$${hist.totals.total_cost.toFixed(2)}</span><span class="ev-sub">7d · ${hist.totals.total_kwh} kWh</span></span>`);
+  } else {
+    // No history yet — show off-peak estimate
+    const first = vehicles[0];
+    if (first) {
+      const offPeakRate = 0.40; // off-peak rate
+      const avgEff = vehicles.reduce((s, v) => s + v.efficiency_mi_per_kwh, 0) / vehicles.length;
+      const evCost = offPeakRate / avgEff;
+      items.push(`<span class="ev-item"><span class="ev-val" style="color:var(--green)">~$${evCost.toFixed(3)}</span><span class="ev-sub">/mi off-peak</span></span>`);
+      items.push(`<span class="ev-item"><span class="ev-val" style="color:var(--text-muted)">$${first.gas_cost_per_mile.toFixed(3)}</span><span class="ev-sub">/mi gas</span></span>`);
+    }
+  }
+
+  summary.innerHTML = items.join('');
+
+  // Show detail row only when charging
+  if (anyCharging) {
+    detail.style.display = '';
+    detail.innerHTML = vehicles.filter(v => v.is_charging).map(v => {
+      const range = v.battery_range != null ? v.battery_range.toFixed(0) : '--';
+      const added = v.charge_energy_added != null ? v.charge_energy_added.toFixed(1) : '--';
+      return `<div class="ev-vehicle-mini">
+        <span class="ev-vname">${v.name}</span>
+        <div class="ev-soc-mini"><div class="fill" style="width:${v.battery_level || 0}%"></div></div>
+        <span class="ev-vstatus">${range} mi · +${added} kWh · ${v.charger_power_kw} kW</span>
+      </div>`;
+    }).join('');
+  } else {
+    detail.style.display = 'none';
   }
 }
 
@@ -2141,16 +2151,8 @@ async function loadEVHistory() {
   try {
     const r = await fetch('/api/ev/history?days=7');
     const d = await r.json();
-    if (!d || !d.totals) return;
-
-    const el = document.getElementById('evWeekCost');
-    const sub = document.getElementById('evWeekSub');
-    if (d.totals.total_cost > 0) {
-      el.textContent = '$' + d.totals.total_cost.toFixed(2);
-      sub.textContent = `${d.totals.total_kwh} kWh · ${d.totals.total_miles_equivalent} mi · saved $${d.totals.savings_vs_gas || 0} vs gas`;
-    } else {
-      el.textContent = '$0';
-      sub.textContent = 'no charging this week';
+    if (d && d.totals) {
+      window._evHistory = d;
     }
   } catch (e) {
     console.error('loadEVHistory error:', e);
