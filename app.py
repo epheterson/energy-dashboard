@@ -31,6 +31,7 @@ from config import (
     is_solar_enabled, get_config,
 )
 from solar_integration import HA_URL, HA_ENTITIES, get_ha_token
+from ev_integration import is_ev_enabled, fetch_ev_live, build_ev_charging_summary
 
 # ==========================================
 # App Setup
@@ -565,6 +566,7 @@ async def api_config():
     cfg = get_config()
     return {
         "solar_enabled": is_solar_enabled(),
+        "ev_enabled": is_ev_enabled(),
         "plan_name": cfg.get("rates", {}).get("plan_name", "Custom"),
     }
 
@@ -601,6 +603,38 @@ async def api_solar(days: int = 7):
     data = await fetch_solar(days)
     if not data:
         return {"error": "Could not fetch solar data"}
+    return data
+
+
+@app.get("/api/ev")
+async def api_ev():
+    """Live EV charging status for all vehicles."""
+    if not is_ev_enabled():
+        return {"error": "EV not configured"}
+    loop = asyncio.get_event_loop()
+    data = await loop.run_in_executor(None, fetch_ev_live)
+    if not data:
+        return {"error": "Could not fetch EV data"}
+    return data
+
+
+@app.get("/api/ev/history")
+async def api_ev_history(days: int = 7):
+    """EV charging history and cost analysis."""
+    if not is_ev_enabled():
+        return {"error": "EV not configured"}
+    days = min(days, 90)
+
+    cache_key = f"ev_history_{days}"
+    cached = cache.get(cache_key, ttl_seconds=3600)
+    if cached:
+        return cached
+
+    loop = asyncio.get_event_loop()
+    data = await loop.run_in_executor(None, build_ev_charging_summary, days)
+    if not data:
+        return {"error": "Could not fetch EV history"}
+    cache.set(cache_key, data)
     return data
 
 
@@ -674,6 +708,20 @@ async def build_live_payload():
     else:
         payload["today_cost"] = 0
         payload["today_kwh"] = 0
+
+    # Add EV charging data (if enabled)
+    if is_ev_enabled():
+        ev_cached = cache.get("ev_live", ttl_seconds=10)
+        if not ev_cached:
+            try:
+                from ev_integration import fetch_ev_live as _fetch_ev
+                ev_cached = _fetch_ev()
+                if ev_cached:
+                    cache.set("ev_live", ev_cached)
+            except Exception:
+                pass
+        if ev_cached:
+            payload["ev"] = ev_cached
 
     return payload
 
