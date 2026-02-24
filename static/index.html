@@ -2106,26 +2106,13 @@ function updateEV(evData) {
 
   items.push('<span class="ev-sep">|</span>');
 
-  // Actual cost/mile from history (not current TOU rate)
-  if (hist && hist.totals && hist.totals.total_miles_equivalent > 0) {
-    const actualCostPerMile = hist.totals.total_cost / hist.totals.total_miles_equivalent;
-    const gasCostPerMile = hist.totals.gas_equivalent_cost / hist.totals.total_miles_equivalent;
-    const savingsPct = ((1 - actualCostPerMile / gasCostPerMile) * 100).toFixed(0);
-    items.push(`<span class="ev-item"><span class="ev-val" style="color:var(--green)">$${actualCostPerMile.toFixed(3)}</span><span class="ev-sub">/mi actual</span></span>`);
-    items.push(`<span class="ev-item"><span class="ev-val" style="color:var(--text-muted)">$${gasCostPerMile.toFixed(3)}</span><span class="ev-sub">/mi gas</span></span>`);
-    items.push(`<span class="ev-item"><span class="ev-val" style="color:var(--green)">${savingsPct}%</span><span class="ev-sub">cheaper</span></span>`);
+  // Actual cost/mile from eGauge metered data (real wall-side measurements)
+  if (hist && hist.miles_equivalent > 0) {
+    const savingsPct = ((1 - hist.cost_per_mile / (hist.gas_equivalent_cost / hist.miles_equivalent)) * 100).toFixed(0);
+    items.push(`<span class="ev-item"><span class="ev-val" style="color:var(--green)">$${hist.cost_per_mile.toFixed(3)}</span><span class="ev-sub">/mi</span></span>`);
+    items.push(`<span class="ev-item"><span class="ev-val" style="color:var(--green)">${savingsPct}% cheaper</span><span class="ev-sub">vs gas</span></span>`);
     items.push('<span class="ev-sep">|</span>');
-    items.push(`<span class="ev-item"><span class="ev-val">$${hist.totals.total_cost.toFixed(2)}</span><span class="ev-sub">7d · ${hist.totals.total_kwh} kWh</span></span>`);
-  } else {
-    // No history yet — show off-peak estimate
-    const first = vehicles[0];
-    if (first) {
-      const offPeakRate = 0.40; // off-peak rate
-      const avgEff = vehicles.reduce((s, v) => s + v.efficiency_mi_per_kwh, 0) / vehicles.length;
-      const evCost = offPeakRate / avgEff;
-      items.push(`<span class="ev-item"><span class="ev-val" style="color:var(--green)">~$${evCost.toFixed(3)}</span><span class="ev-sub">/mi off-peak</span></span>`);
-      items.push(`<span class="ev-item"><span class="ev-val" style="color:var(--text-muted)">$${first.gas_cost_per_mile.toFixed(3)}</span><span class="ev-sub">/mi gas</span></span>`);
-    }
+    items.push(`<span class="ev-item"><span class="ev-val">$${hist.total_cost.toFixed(2)}</span><span class="ev-sub">${hist.days}d · ${hist.total_kwh} kWh · ${hist.off_peak_pct}% off-peak</span></span>`);
   }
 
   summary.innerHTML = items.join('');
@@ -2151,7 +2138,7 @@ async function loadEVHistory() {
   try {
     const r = await fetch('/api/ev/history?days=7');
     const d = await r.json();
-    if (d && d.totals) {
+    if (d && !d.error) {
       window._evHistory = d;
     }
   } catch (e) {

@@ -31,7 +31,7 @@ from config import (
     is_solar_enabled, get_config,
 )
 from solar_integration import HA_URL, HA_ENTITIES, get_ha_token
-from ev_integration import is_ev_enabled, fetch_ev_live, build_ev_charging_summary
+from ev_integration import is_ev_enabled, fetch_ev_live, get_vehicles, get_ev_config
 
 # ==========================================
 # App Setup
@@ -620,9 +620,11 @@ async def api_ev():
 
 @app.get("/api/ev/history")
 async def api_ev_history(days: int = 7):
-    """EV charging history and cost analysis."""
-    if not is_ev_enabled():
-        return {"error": "EV not configured"}
+    """EV charging cost from eGauge 'EV Charger' circuit (real metered data).
+
+    Uses wall-side CT clamp data with TOU cost calculation — much more
+    accurate than Tesla Fleet's charger_power entity (which barely reports).
+    """
     days = min(days, 90)
 
     cache_key = f"ev_history_{days}"
@@ -630,10 +632,46 @@ async def api_ev_history(days: int = 7):
     if cached:
         return cached
 
-    loop = asyncio.get_event_loop()
-    data = await loop.run_in_executor(None, build_ev_charging_summary, days)
-    if not data:
-        return {"error": "Could not fetch EV history"}
+    # Pull from existing eGauge history — already has per-circuit TOU costs
+    history = await fetch_history(days)
+    if not history:
+        return {"error": "Could not fetch history"}
+
+    ev_circuit = None
+    for c in history.get("circuits", []):
+        if c["name"] == "EV Charger":
+            ev_circuit = c
+            break
+
+    if not ev_circuit:
+        return {"error": "EV Charger circuit not found in eGauge"}
+
+    # Get vehicle efficiencies for miles calculation
+    vehicles = get_vehicles()
+    efficiencies = [v.get("efficiency_mi_per_kwh", 3.3) for v in vehicles.values()]
+    avg_efficiency = sum(efficiencies) / len(efficiencies) if efficiencies else 3.3
+
+    total_kwh = ev_circuit["total_kwh"]
+    total_cost = ev_circuit["total_cost"]
+    miles = total_kwh * avg_efficiency
+    gas_price = get_ev_config().get("gas_price_per_gallon", 4.50)
+    gas_equivalent = miles / 25 * gas_price
+
+    data = {
+        "days": days,
+        "total_kwh": round(total_kwh, 2),
+        "total_cost": round(total_cost, 2),
+        "avg_daily_kwh": round(total_kwh / max(days, 1), 2),
+        "avg_daily_cost": round(total_cost / max(days, 1), 2),
+        "cost_per_kwh": round(total_cost / total_kwh, 3) if total_kwh > 0 else 0,
+        "cost_per_mile": round(total_cost / miles, 3) if miles > 0 else 0,
+        "miles_equivalent": round(miles, 1),
+        "gas_equivalent_cost": round(gas_equivalent, 2),
+        "savings_vs_gas": round(gas_equivalent - total_cost, 2),
+        "avg_efficiency": avg_efficiency,
+        "by_tou": ev_circuit.get("by_tou", {}),
+        "off_peak_pct": round(ev_circuit.get("by_tou", {}).get("off_peak", {}).get("percent", 0), 1),
+    }
     cache.set(cache_key, data)
     return data
 
