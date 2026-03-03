@@ -2051,9 +2051,11 @@ async function loadSolar() {
         `☀ ${bat.solar_charge_kwh.toFixed(1)} kWh · ⏻ ${bat.grid_charge_kwh.toFixed(1)} kWh`;
 
       // Efficiency
-      document.getElementById('batEfficiency').textContent = (bat.efficiency * 100).toFixed(0) + '%';
+      const effPct = (bat.efficiency * 100).toFixed(0);
+      document.getElementById('batEfficiency').textContent = effPct + '%';
+      const lostText = bat.energy_lost_kwh > 0 ? ` · ${bat.energy_lost_kwh.toFixed(1)} kWh lost` : '';
       document.getElementById('batEffSub').textContent =
-        `${bat.charge_kwh.toFixed(1)} in → ${bat.discharge_kwh.toFixed(1)} out · ${bat.energy_lost_kwh.toFixed(1)} kWh lost`;
+        `${bat.charge_kwh.toFixed(1)} in → ${bat.discharge_kwh.toFixed(1)} out${lostText}`;
 
       // Battery savings = value displaced at grid rates - actual battery cost
       const batSavingsVal = (bat.value_displaced || 0) - bat.total_battery_cost;

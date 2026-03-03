@@ -372,8 +372,47 @@ def blend_egauge_with_solar(egauge_hourly, solar_hourly):
     else:
         battery_cost_per_kwh = 0
 
-    # Measured efficiency (should be ~0.90 for Powerwall 2)
-    measured_efficiency = (total_discharge_kwh / total_charge_kwh) if total_charge_kwh > 0 else 0
+    # Measured round-trip efficiency from complete charge-discharge cycles.
+    # Only count days where grid charged the battery — grid charging is a clean,
+    # reliably-measured signal (unlike solar charge sensor which reports 3x fewer
+    # data points). Days with only discharge are excluded to avoid >100% artifacts
+    # from pre-existing stored energy.
+    day_grid_charge = defaultdict(float)
+    day_total_charge = defaultdict(float)
+    day_discharge = defaultdict(float)
+    for hour_data in egauge_hourly:
+        date_str = str(hour_data['date'])
+        hour_key = (date_str, hour_data['hour'])
+        solar_data = solar_hourly.get(hour_key)
+        if not solar_data:
+            continue
+        charge_kwh = solar_data.get('battery_charge_kwh', 0)
+        discharge_kwh = solar_data.get('battery_discharge_kwh', 0)
+        day_total_charge[date_str] += charge_kwh
+        day_discharge[date_str] += discharge_kwh
+        # Estimate grid portion of charge for this hour
+        if charge_kwh > 0:
+            solar_kwh = solar_data.get('solar_kwh', 0)
+            grid_import_kwh = solar_data.get('grid_import_kwh', 0)
+            grid_export_kwh = solar_data.get('grid_export_kwh', 0)
+            _, gtb = _compute_battery_charge_source(
+                solar_kwh, grid_import_kwh, grid_export_kwh,
+                charge_kwh, discharge_kwh
+            )
+            day_grid_charge[date_str] += gtb
+
+    # Filter to days with grid charging (reliable measurement of energy in)
+    grid_days = [d for d, v in day_grid_charge.items() if v > 0.5]
+    if grid_days:
+        cycle_charge = sum(day_total_charge[d] for d in grid_days)
+        cycle_discharge = sum(day_discharge[d] for d in grid_days)
+        if cycle_charge > 0:
+            raw_efficiency = cycle_discharge / cycle_charge
+            measured_efficiency = raw_efficiency if raw_efficiency <= 1.0 else battery_efficiency
+        else:
+            measured_efficiency = battery_efficiency
+    else:
+        measured_efficiency = battery_efficiency
 
     # Battery solar percentage
     battery_solar_pct = (total_solar_to_battery / total_charge_kwh * 100) if total_charge_kwh > 0 else 0
@@ -419,7 +458,7 @@ def blend_egauge_with_solar(egauge_hourly, solar_hourly):
         'battery_grid_charge_cost': round(total_grid_charge_cost, 2),
         'battery_efficiency_measured': round(measured_efficiency, 3),
         'battery_efficiency_config': battery_efficiency,
-        'battery_energy_lost_kwh': round(total_charge_kwh - total_discharge_kwh, 2),
+        'battery_energy_lost_kwh': round(total_charge_kwh * (1 - measured_efficiency), 2),
         'by_tou': {
             'peak': {'solar': 0, 'grid_import': 0, 'grid_export': 0, 'battery_discharge': 0, 'consumption': 0, 'grid_cost': 0, 'battery_cost': 0, 'export_credit': 0},
             'part_peak': {'solar': 0, 'grid_import': 0, 'grid_export': 0, 'battery_discharge': 0, 'consumption': 0, 'grid_cost': 0, 'battery_cost': 0, 'export_credit': 0},
