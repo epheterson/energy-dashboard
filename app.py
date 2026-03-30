@@ -700,7 +700,16 @@ async def api_billing():
     days_so_far = datetime.now().day
     solar = await fetch_solar(days_so_far)
 
-    current = estimate_current_month(solar)
+    # Try Tesla API for 100% coverage data
+    tesla = None
+    try:
+        from tesla_energy import fetch_tesla_energy
+        loop = asyncio.get_event_loop()
+        tesla = await loop.run_in_executor(None, fetch_tesla_energy, days_so_far)
+    except Exception as e:
+        print(f"Tesla energy fetch skipped: {e}")
+
+    current = estimate_current_month(solar, tesla_data=tesla)
 
     billing_cfg = get_billing_config()
     trueup_month = billing_cfg.get('trueup_month', 1)

@@ -101,11 +101,32 @@ def calculate_billing_from_solar(solar_data, days_in_period):
     }
 
 
-def estimate_current_month(solar_data):
+def _tesla_to_solar_format(tesla_data):
+    """Convert Tesla API data to solar_data format for billing calculation."""
+    if not tesla_data:
+        return None
+    return {
+        'grid_import_kwh': tesla_data.get('grid_import_kwh', 0),
+        'grid_export_kwh': tesla_data.get('grid_export_kwh', 0),
+        'solar_kwh': tesla_data.get('solar_kwh', 0),
+        'consumption_kwh': tesla_data.get('consumption_kwh', 0),
+        'by_tou': {
+            period: {
+                'grid_import': vals.get('grid_import', 0),
+                'grid_export': vals.get('grid_export', 0),
+                'export_credit': 0,  # Will be calculated by billing
+            }
+            for period, vals in tesla_data.get('by_tou', {}).items()
+        },
+    }
+
+
+def estimate_current_month(solar_data, tesla_data=None):
     """Estimate the current month's electrical bill and NEM charges.
 
     Args:
-        solar_data: Dict from _build_solar() for days elapsed this month.
+        solar_data: Dict from _build_solar() (HA-based, may have gaps).
+        tesla_data: Dict from fetch_tesla_energy() (100% coverage, preferred).
 
     Returns dict with bill estimate and projection.
     """
@@ -116,7 +137,14 @@ def estimate_current_month(solar_data):
         days_in_month = (date(today.year, today.month + 1, 1) - timedelta(days=1)).day
     days_elapsed = today.day
 
-    billing = calculate_billing_from_solar(solar_data, days_elapsed)
+    # Prefer Tesla data (100% coverage) over HA solar data (partial coverage)
+    billing_source = None
+    if tesla_data:
+        billing_source = _tesla_to_solar_format(tesla_data)
+    if not billing_source:
+        billing_source = solar_data
+
+    billing = calculate_billing_from_solar(billing_source, days_elapsed)
     if not billing:
         daily_fixed = get_billing_fixed_daily()
         return {
