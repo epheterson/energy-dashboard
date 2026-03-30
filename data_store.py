@@ -550,8 +550,8 @@ def update_actual_electric(month, electric_amount):
     ''', (electric_amount, month))
     if cursor.rowcount == 0:
         cursor.execute('''
-            INSERT INTO monthly_billing (month, actual_electric, days)
-            VALUES (?, ?, 0)
+            INSERT INTO monthly_billing (month, grid_cost, export_credit, net_energy_cost, base_charge, total_bill, actual_electric, days)
+            VALUES (?, 0, 0, 0, 0, 0, ?, 0)
         ''', (month, electric_amount))
     conn.commit()
     conn.close()

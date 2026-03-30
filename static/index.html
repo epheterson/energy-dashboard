@@ -690,6 +690,169 @@ tr:last-child td { border-bottom: none; }
   table.compact th { padding: 6px 8px; font-size: 10px; }
   th { padding: 6px 8px; font-size: 10px; }
   td { padding: 8px; }
+  .billing-row { grid-template-columns: 1fr !important; }
+  .battery-forecast { min-width: 0; }
+}
+
+/* ---- Billing Panel ---- */
+
+.billing-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.billing-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 20px;
+}
+
+.billing-card .billing-title {
+  font-size: 12px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 16px;
+}
+
+.billing-card .billing-hero {
+  font-size: 36px;
+  font-weight: 700;
+  letter-spacing: -1px;
+  margin-bottom: 4px;
+}
+
+.billing-card .billing-hero-sub {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 16px;
+}
+
+.billing-breakdown {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.billing-line {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+}
+
+.billing-line .billing-line-label {
+  color: var(--text-muted);
+}
+
+.billing-line .billing-line-value {
+  font-weight: 600;
+}
+
+.billing-line.deferred {
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.billing-line .billing-note {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
+.billing-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 12px 0;
+}
+
+.trueup-progress {
+  width: 100%;
+  height: 6px;
+  background: var(--surface-2);
+  border-radius: 3px;
+  margin: 12px 0 8px;
+  overflow: hidden;
+}
+
+.trueup-progress .fill {
+  height: 100%;
+  border-radius: 3px;
+  background: var(--accent);
+  transition: width 1s ease;
+}
+
+.trueup-months {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* ---- Battery Forecast Card ---- */
+
+.battery-forecast {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px 20px;
+}
+
+.battery-forecast .forecast-title {
+  font-size: 12px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 12px;
+}
+
+.forecast-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.forecast-item .forecast-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 2px;
+}
+
+.forecast-item .forecast-value {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.forecast-item .forecast-sub {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.forecast-reasoning {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.forecast-updated {
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--text-muted);
+  opacity: 0.6;
+}
+
+.billing-unavailable, .forecast-unavailable {
+  color: var(--text-muted);
+  font-size: 13px;
+  text-align: center;
+  padding: 20px 0;
 }
 </style>
 </head>
@@ -799,6 +962,95 @@ tr:last-child td { border-bottom: none; }
     <span style="font-size:12px;color:var(--text-muted)" id="oppSummary"></span>
   </div>
   <div class="panel-body" style="padding:12px 20px;display:none" id="opportunitiesList"></div>
+</div>
+
+<!-- Billing Panel -->
+<div class="billing-row" id="billingPanel" data-solar>
+  <div class="billing-card" id="billingMonthlyCard">
+    <div class="billing-title">Monthly Bill Estimate</div>
+    <div class="billing-hero" id="billingMonthlyTotal">--</div>
+    <div class="billing-hero-sub" id="billingMonthlyPeriod">projected this month</div>
+    <div class="billing-breakdown" id="billingBreakdown">
+      <div class="billing-line">
+        <span class="billing-line-label">MCE Generation</span>
+        <span class="billing-line-value" id="billingGeneration">--</span>
+      </div>
+      <div class="billing-line">
+        <span class="billing-line-label">Fixed Charges</span>
+        <span class="billing-line-value" id="billingFixed">--</span>
+      </div>
+      <div class="billing-line deferred">
+        <span class="billing-line-label">NEM Charges <span class="billing-note">(deferred)</span></span>
+        <span class="billing-line-value" id="billingNem">--</span>
+      </div>
+      <div style="font-size:11px;color:var(--text-muted);margin-top:2px" id="billingNemNote">accumulating for Jan true-up</div>
+      <div class="billing-divider"></div>
+      <div class="billing-line">
+        <span class="billing-line-label">Grid Import</span>
+        <span class="billing-line-value" id="billingImportKwh">--</span>
+      </div>
+      <div class="billing-line">
+        <span class="billing-line-label">Grid Export</span>
+        <span class="billing-line-value" id="billingExportKwh">--</span>
+      </div>
+      <div class="billing-divider"></div>
+      <div class="billing-line">
+        <span class="billing-line-label">Last Month Actual</span>
+        <span class="billing-line-value" id="billingLastMonth">--</span>
+      </div>
+    </div>
+  </div>
+  <div class="billing-card" id="billingTrueupCard">
+    <div class="billing-title">True-Up Tracker</div>
+    <div class="billing-hero" id="trueupProjected">--</div>
+    <div class="billing-hero-sub">projected annual true-up</div>
+    <div class="trueup-progress">
+      <div class="fill" id="trueupProgressFill" style="width:0%"></div>
+    </div>
+    <div class="trueup-months">
+      <span id="trueupMonthsElapsed">-- months</span>
+      <span>12 months</span>
+    </div>
+    <div class="billing-breakdown" style="margin-top:16px">
+      <div class="billing-line">
+        <span class="billing-line-label">Monthly Avg NEM</span>
+        <span class="billing-line-value" id="trueupMonthlyAvg">--</span>
+      </div>
+      <div class="billing-line">
+        <span class="billing-line-label">YTD NEM Total</span>
+        <span class="billing-line-value" id="trueupYtd">--</span>
+      </div>
+      <div class="billing-line">
+        <span class="billing-line-label">PG&amp;E Reported YTD</span>
+        <span class="billing-line-value" id="trueupPgeYtd">--</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Battery Forecast -->
+<div class="battery-forecast" id="batteryForecastCard" data-solar style="display:none">
+  <div class="forecast-title">Tomorrow's Forecast</div>
+  <div class="forecast-grid">
+    <div class="forecast-item">
+      <div class="forecast-label">Cloud Cover</div>
+      <div class="forecast-value"><span id="forecastCloudIcon"></span> <span id="forecastCloudPct">--</span></div>
+    </div>
+    <div class="forecast-item">
+      <div class="forecast-label">Predicted Solar</div>
+      <div class="forecast-value" style="color:var(--solar)" id="forecastSolarKwh">--</div>
+    </div>
+    <div class="forecast-item">
+      <div class="forecast-label">Recommended Cap</div>
+      <div class="forecast-value" style="color:var(--green)" id="forecastCap">--</div>
+    </div>
+    <div class="forecast-item">
+      <div class="forecast-label">Cap Status</div>
+      <div class="forecast-value" id="forecastCapStatus">--</div>
+    </div>
+  </div>
+  <div class="forecast-reasoning" id="forecastReasoning"></div>
+  <div class="forecast-updated" id="forecastUpdated"></div>
 </div>
 
 <!-- Circuits Table -->
@@ -2149,6 +2401,168 @@ async function loadEVHistory() {
 }
 
 // ==========================================
+// Billing & Battery Forecast
+// ==========================================
+
+const BILLING_REFRESH_MS = 300000;   // 5 min
+const FORECAST_REFRESH_MS = 3600000; // 1 hour
+
+async function loadBilling() {
+  try {
+    const r = await fetch('/api/billing');
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    updateBillingPanel(d);
+  } catch (e) {
+    console.error('loadBilling error:', e);
+    showBillingUnavailable();
+  }
+}
+
+function updateBillingPanel(d) {
+  const cm = d.current_month || {};
+  const tu = d.trueup || {};
+
+  // Monthly bill estimate
+  const projected = cm.projections?.projected_total;
+  document.getElementById('billingMonthlyTotal').textContent = projected != null ? '$' + projected.toFixed(2) : '--';
+  document.getElementById('billingMonthlyPeriod').textContent = cm.period || 'projected this month';
+
+  // Breakdown
+  const gen = cm.generation;
+  document.getElementById('billingGeneration').textContent = gen != null ? '$' + gen.toFixed(2) : '--';
+  document.getElementById('billingFixed').textContent = cm.fixed_charges != null ? '$' + cm.fixed_charges.toFixed(2) : '--';
+
+  // NEM (deferred)
+  const nem = cm.nem;
+  if (nem != null) {
+    const nemVal = typeof nem === 'object' ? (nem.total || nem.charges || 0) : nem;
+    document.getElementById('billingNem').textContent = '$' + Number(nemVal).toFixed(2);
+  } else {
+    document.getElementById('billingNem').textContent = '--';
+  }
+
+  // Grid import/export
+  const imp = cm.projections?.import_kwh ?? cm.import_kwh;
+  const exp = cm.projections?.export_kwh ?? cm.export_kwh;
+  document.getElementById('billingImportKwh').textContent = imp != null ? imp.toFixed(1) + ' kWh' : '--';
+  document.getElementById('billingExportKwh').textContent = exp != null ? exp.toFixed(1) + ' kWh' : '--';
+
+  // Last month comparison
+  const last = cm.last_month_actual ?? cm.projections?.last_month;
+  document.getElementById('billingLastMonth').textContent = last != null ? '$' + Number(last).toFixed(2) : '--';
+
+  // True-up tracker
+  document.getElementById('trueupProjected').textContent = tu.projected_annual != null ? '$' + tu.projected_annual.toFixed(2) : '--';
+
+  const monthsElapsed = tu.months_elapsed || 0;
+  document.getElementById('trueupProgressFill').style.width = ((monthsElapsed / 12) * 100).toFixed(1) + '%';
+  document.getElementById('trueupMonthsElapsed').textContent = monthsElapsed + ' month' + (monthsElapsed !== 1 ? 's' : '');
+
+  document.getElementById('trueupMonthlyAvg').textContent = tu.monthly_avg_nem != null ? '$' + tu.monthly_avg_nem.toFixed(2) : '--';
+  document.getElementById('trueupYtd').textContent = tu.ytd_total != null ? '$' + tu.ytd_total.toFixed(2) : '--';
+  document.getElementById('trueupPgeYtd').textContent = tu.pge_reported_ytd != null ? '$' + tu.pge_reported_ytd.toFixed(2) : '--';
+
+  // Color the projected true-up
+  const trueupEl = document.getElementById('trueupProjected');
+  if (tu.projected_annual != null) {
+    trueupEl.style.color = tu.projected_annual <= 0 ? 'var(--green)' : tu.projected_annual > 200 ? 'var(--red)' : 'var(--yellow)';
+  }
+}
+
+function showBillingUnavailable() {
+  document.getElementById('billingMonthlyTotal').textContent = '--';
+  document.getElementById('billingGeneration').textContent = '--';
+  document.getElementById('billingFixed').textContent = '--';
+  document.getElementById('billingNem').textContent = '--';
+  document.getElementById('billingImportKwh').textContent = '--';
+  document.getElementById('billingExportKwh').textContent = '--';
+  document.getElementById('billingLastMonth').textContent = '--';
+  document.getElementById('billingNemNote').textContent = 'billing data unavailable';
+  document.getElementById('trueupProjected').textContent = '--';
+  document.getElementById('trueupMonthlyAvg').textContent = '--';
+  document.getElementById('trueupYtd').textContent = '--';
+  document.getElementById('trueupPgeYtd').textContent = '--';
+}
+
+async function loadBatteryForecast() {
+  try {
+    const r = await fetch('/api/battery/recommended-cap');
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    updateBatteryForecast(d);
+    document.getElementById('batteryForecastCard').style.display = '';
+  } catch (e) {
+    console.error('loadBatteryForecast error:', e);
+    showForecastUnavailable();
+  }
+}
+
+function updateBatteryForecast(d) {
+  // Cloud cover
+  const sp = d.solar_prediction || {};
+  const cloud = sp.cloud_cover;
+  const cloudEl = document.getElementById('forecastCloudPct');
+  const iconEl = document.getElementById('forecastCloudIcon');
+  if (cloud != null) {
+    cloudEl.textContent = cloud.toFixed(0) + '%';
+    if (cloud < 20) iconEl.textContent = '\u2600\uFE0F';
+    else if (cloud < 50) iconEl.textContent = '\u26C5';
+    else if (cloud < 80) iconEl.textContent = '\u2601\uFE0F';
+    else iconEl.textContent = '\uD83C\uDF27\uFE0F';
+  } else {
+    cloudEl.textContent = '--';
+    iconEl.textContent = '';
+  }
+
+  // Predicted solar
+  const predKwh = sp.predicted_kwh;
+  document.getElementById('forecastSolarKwh').textContent = predKwh != null ? predKwh.toFixed(1) + ' kWh' : '--';
+
+  // Recommended cap
+  document.getElementById('forecastCap').textContent = d.recommended_cap != null ? d.recommended_cap + '%' : '--';
+
+  // Cap status
+  const capStatus = document.getElementById('forecastCapStatus');
+  if (d.recommended_cap != null) {
+    capStatus.textContent = 'Set';
+    capStatus.style.color = 'var(--green)';
+  } else {
+    capStatus.textContent = '--';
+    capStatus.style.color = '';
+  }
+
+  // Reasoning
+  const reasonEl = document.getElementById('forecastReasoning');
+  reasonEl.textContent = d.reasoning || '';
+  reasonEl.style.display = d.reasoning ? '' : 'none';
+
+  // Timestamp
+  const updEl = document.getElementById('forecastUpdated');
+  if (d.timestamp || d.updated_at) {
+    const t = new Date(d.timestamp || d.updated_at);
+    updEl.textContent = 'Updated ' + t.toLocaleTimeString();
+  } else {
+    updEl.textContent = '';
+  }
+}
+
+function showForecastUnavailable() {
+  const card = document.getElementById('batteryForecastCard');
+  card.style.display = '';
+  document.getElementById('forecastCloudPct').textContent = '--';
+  document.getElementById('forecastCloudIcon').textContent = '';
+  document.getElementById('forecastSolarKwh').textContent = '--';
+  document.getElementById('forecastCap').textContent = '--';
+  document.getElementById('forecastCapStatus').textContent = '--';
+  const reasoning = document.getElementById('forecastReasoning');
+  reasoning.textContent = 'Forecast data unavailable';
+  reasoning.style.display = '';
+}
+
+// ==========================================
 // Init
 // ==========================================
 
@@ -2190,6 +2604,14 @@ async function init() {
   if (window._evEnabled) {
     loadEVHistory();
     setInterval(loadEVHistory, 300000); // refresh every 5 min
+  }
+
+  // Billing and battery forecast (solar systems only)
+  if (window._solarEnabled) {
+    loadBilling();
+    setInterval(loadBilling, BILLING_REFRESH_MS);
+    loadBatteryForecast();
+    setInterval(loadBatteryForecast, FORECAST_REFRESH_MS);
   }
 
   setInterval(loadToday, TODAY_REFRESH_MS);

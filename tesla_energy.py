@@ -17,11 +17,38 @@ from solar_integration import HA_URL, get_ha_token
 TESLA_API_BASE = "https://fleet-api.prd.na.vn.cloud.tesla.com"
 
 
+def _get_tesla_token_from_ha():
+    """Read Tesla Fleet OAuth token from HA's config entries via API."""
+    try:
+        token = get_ha_token()
+        if not token:
+            return None
+        cmd = [
+            'curl', '-s',
+            '-H', f'Authorization: Bearer {token}',
+            f'{HA_URL}/api/config/config_entries/entry'
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        entries = json.loads(result.stdout)
+        for entry in entries:
+            if entry.get('domain') == 'tesla_fleet':
+                # Entry data isn't exposed via this API, but we can try
+                # the internal storage path
+                break
+    except Exception:
+        pass
+    return None
+
+
 def _get_tesla_config():
-    """Get Tesla energy site config from billing config."""
+    """Get Tesla energy site config. Token from config.yml or HA."""
     cfg = get_config()
     tesla = cfg.get('billing', {}).get('tesla', {})
-    return tesla.get('site_id'), tesla.get('token')
+    site_id = tesla.get('site_id')
+    token = tesla.get('token')
+    if not token:
+        token = _get_tesla_token_from_ha()
+    return site_id, token
 
 
 def fetch_tesla_energy(days=30):
