@@ -776,6 +776,18 @@ async def api_billing_actual(month: str, amount: float, electric: float = None):
     return {"status": "ok", "month": month, "total": amount, "electric": electric}
 
 
+@app.get("/api/battery/recommended-cap")
+async def api_battery_cap():
+    """Predict tomorrow's solar and recommend grid charge cap."""
+    loop = asyncio.get_event_loop()
+    try:
+        from solar_forecast import recommend_charge_cap
+        result = await loop.run_in_executor(None, recommend_charge_cap)
+        return result
+    except Exception as e:
+        return {"error": str(e)}
+
+
 # ==========================================
 # WebSocket — Live Power Flow
 # ==========================================
