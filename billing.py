@@ -209,13 +209,16 @@ def estimate_trueup(monthly_snapshots, current_month_nem=0):
     ytd_nem = sum(s.get('nem_charges', s.get('net_energy_cost', 0)) for s in monthly_snapshots)
     ytd_nem += current_month_nem
 
-    daily_fixed = get_billing_fixed_daily()
-    ytd_delivery_credits = daily_fixed * 30.5 * months_elapsed
+    # NEM delivery credits use the Minimum Delivery Charge rate ($0.40317/day),
+    # NOT the Base Services Charge ($0.79343/day). These are separate post-March 2026.
+    # The delivery credit at true-up offsets NEM charges.
+    min_delivery_daily = 0.40317  # CPUC-set Minimum Delivery Charge
+    ytd_delivery_credits = min_delivery_daily * 30.5 * months_elapsed
 
     months_for_avg = max(months_elapsed, 1)
     monthly_avg_nem = ytd_nem / months_for_avg
     projected_annual_nem = monthly_avg_nem * 12
-    projected_delivery_credits = daily_fixed * 365
+    projected_delivery_credits = min_delivery_daily * 365
     projected_trueup = max(0, projected_annual_nem - projected_delivery_credits)
 
     return {

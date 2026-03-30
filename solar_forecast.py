@@ -68,8 +68,12 @@ def fetch_tomorrow_cloud_cover():
             # NWS uses ISO 8601 duration format: "2026-03-31T08:00:00+00:00/PT1H"
             dt_str = valid_time.split('/')[0]
             dt = datetime.fromisoformat(dt_str.replace('Z', '+00:00'))
-            # Convert to local (Pacific) — rough offset
-            local_dt = dt - timedelta(hours=7)  # PDT
+            # Convert to Pacific time (handles PST/PDT automatically)
+            try:
+                from zoneinfo import ZoneInfo
+                local_dt = dt.astimezone(ZoneInfo("America/Los_Angeles"))
+            except ImportError:
+                local_dt = dt - timedelta(hours=7)  # Fallback: PDT
 
             if local_dt.date() == tomorrow and 8 <= local_dt.hour <= 17:
                 daytime_covers.append(entry.get('value', 50))
