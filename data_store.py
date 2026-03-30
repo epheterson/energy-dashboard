@@ -96,6 +96,36 @@ def init_database():
         )
     ''')
 
+    # Add new columns to monthly_billing if they don't exist
+    try:
+        cursor.execute('ALTER TABLE monthly_billing ADD COLUMN nem_charges REAL DEFAULT 0')
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+    try:
+        cursor.execute('ALTER TABLE monthly_billing ADD COLUMN generation_charges REAL DEFAULT 0')
+    except sqlite3.OperationalError:
+        pass
+    try:
+        cursor.execute('ALTER TABLE monthly_billing ADD COLUMN fixed_charges REAL DEFAULT 0')
+    except sqlite3.OperationalError:
+        pass
+    try:
+        cursor.execute('ALTER TABLE monthly_billing ADD COLUMN grid_import_kwh REAL DEFAULT 0')
+    except sqlite3.OperationalError:
+        pass
+    try:
+        cursor.execute('ALTER TABLE monthly_billing ADD COLUMN grid_export_kwh REAL DEFAULT 0')
+    except sqlite3.OperationalError:
+        pass
+    try:
+        cursor.execute('ALTER TABLE monthly_billing ADD COLUMN net_kwh REAL DEFAULT 0')
+    except sqlite3.OperationalError:
+        pass
+    try:
+        cursor.execute('ALTER TABLE monthly_billing ADD COLUMN actual_electric REAL')
+    except sqlite3.OperationalError:
+        pass
+
     # Create indexes for common queries
     cursor.execute('''
         CREATE INDEX IF NOT EXISTS idx_hourly_timestamp
@@ -441,15 +471,27 @@ def get_register_history(register_name: str, days: int = 30) -> List[Dict]:
     return result
 
 
-def store_monthly_billing(month, grid_cost, export_credit, net_energy_cost, base_charge, total_bill, days):
+def store_monthly_billing(month, nem_charges=0, generation_charges=0, fixed_charges=0,
+                          grid_import_kwh=0, grid_export_kwh=0, net_kwh=0,
+                          grid_cost=0, export_credit=0, net_energy_cost=0,
+                          base_charge=0, total_bill=0, days=0):
     """Store or update a monthly billing snapshot."""
     init_database()
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute('''
-        INSERT INTO monthly_billing (month, grid_cost, export_credit, net_energy_cost, base_charge, total_bill, days, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        INSERT INTO monthly_billing
+            (month, nem_charges, generation_charges, fixed_charges,
+             grid_import_kwh, grid_export_kwh, net_kwh,
+             grid_cost, export_credit, net_energy_cost, base_charge, total_bill, days, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
         ON CONFLICT(month) DO UPDATE SET
+            nem_charges=excluded.nem_charges,
+            generation_charges=excluded.generation_charges,
+            fixed_charges=excluded.fixed_charges,
+            grid_import_kwh=excluded.grid_import_kwh,
+            grid_export_kwh=excluded.grid_export_kwh,
+            net_kwh=excluded.net_kwh,
             grid_cost=excluded.grid_cost,
             export_credit=excluded.export_credit,
             net_energy_cost=excluded.net_energy_cost,
@@ -457,7 +499,9 @@ def store_monthly_billing(month, grid_cost, export_credit, net_energy_cost, base
             total_bill=excluded.total_bill,
             days=excluded.days,
             updated_at=CURRENT_TIMESTAMP
-    ''', (month, grid_cost, export_credit, net_energy_cost, base_charge, total_bill, days))
+    ''', (month, nem_charges, generation_charges, fixed_charges,
+          grid_import_kwh, grid_export_kwh, net_kwh,
+          grid_cost, export_credit, net_energy_cost, base_charge, total_bill, days))
     conn.commit()
     conn.close()
 
@@ -491,6 +535,24 @@ def update_actual_bill(month, amount):
             INSERT INTO monthly_billing (month, grid_cost, export_credit, net_energy_cost, base_charge, total_bill, actual_bill, days)
             VALUES (?, 0, 0, 0, 0, 0, ?, 0)
         ''', (month, amount))
+    conn.commit()
+    conn.close()
+
+
+def update_actual_electric(month, electric_amount):
+    """Record actual electric bill amount (excluding gas) for comparison."""
+    init_database()
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        UPDATE monthly_billing SET actual_electric = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE month = ?
+    ''', (electric_amount, month))
+    if cursor.rowcount == 0:
+        cursor.execute('''
+            INSERT INTO monthly_billing (month, actual_electric, days)
+            VALUES (?, ?, 0)
+        ''', (month, electric_amount))
     conn.commit()
     conn.close()
 

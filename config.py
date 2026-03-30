@@ -61,6 +61,44 @@ def get_billing_config():
     return cfg.get('billing', {})
 
 
+def get_billing_delivery_rate(date, tou_period):
+    """Get PG&E delivery rate for billing/NEM calculations."""
+    cfg = _load_config()
+    delivery = cfg.get('billing', {}).get('delivery', {})
+    season = 'summer' if is_summer(date) else 'winter'
+    return delivery.get(season, {}).get(tou_period, get_rate(date, tou_period))
+
+def get_billing_generation_rate(date, tou_period):
+    """Get CCA generation rate. Returns 0 if no CCA."""
+    cfg = _load_config()
+    billing = cfg.get('billing', {})
+    if not billing.get('cca', {}).get('enabled', False):
+        return 0.0
+    gen = billing.get('generation', {})
+    season = 'summer' if is_summer(date) else 'winter'
+    return gen.get(season, {}).get(tou_period, 0.0)
+
+def get_billing_fixed_daily():
+    """Get daily fixed charge (Base Services Charge)."""
+    cfg = _load_config()
+    return cfg.get('billing', {}).get('fixed', {}).get('daily_charge', 0.79343)
+
+def get_nem_adjustment():
+    """Get net NEM adjustment per kWh."""
+    cfg = _load_config()
+    return cfg.get('billing', {}).get('nem_adjustments', {}).get('net_per_kwh', 0.0)
+
+def is_cca_enabled():
+    """Check if CCA provider is configured."""
+    cfg = _load_config()
+    return cfg.get('billing', {}).get('cca', {}).get('enabled', False)
+
+def get_cca_storage_credit():
+    """Get monthly CCA storage credit."""
+    cfg = _load_config()
+    return cfg.get('billing', {}).get('cca', {}).get('storage_credit_monthly', 0.0)
+
+
 def is_solar_enabled():
     """Check if solar integration is enabled in config."""
     cfg = _load_config()

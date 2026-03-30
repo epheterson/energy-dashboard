@@ -519,6 +519,19 @@ def _build_solar(days):
         "solar_savings": round(full_rate_cost - net_cost, 2),
         "circuits": circuits,
         "hourly": hourly_source,
+        "by_tou": {
+            period: {
+                "solar": round(d.get("solar", 0), 2),
+                "grid_import": round(d.get("grid_import", 0), 2),
+                "grid_export": round(d.get("grid_export", 0), 2),
+                "battery_discharge": round(d.get("battery_discharge", 0), 2),
+                "consumption": round(d.get("consumption", 0), 2),
+                "grid_cost": round(d.get("grid_cost", 0), 2),
+                "battery_cost": round(d.get("battery_cost", 0), 2),
+                "export_credit": round(d.get("export_credit", 0), 2),
+            }
+            for period, d in system.get("by_tou", {}).items()
+        },
     }
 
     # Battery economics (from charge source attribution)
@@ -678,19 +691,17 @@ async def api_ev_history(days: int = 7):
 
 @app.get("/api/billing")
 async def api_billing():
-    """Bill estimation and true-up tracking."""
+    """Accurate bill estimation with NEM/generation/fixed separation."""
     from datetime import datetime
     from billing import estimate_current_month, estimate_trueup
     from data_store import get_monthly_billing
+    from config import get_billing_config
 
     days_so_far = datetime.now().day
-    history = await fetch_history(days_so_far)
     solar = await fetch_solar(days_so_far)
 
-    current = estimate_current_month(history, solar)
+    current = estimate_current_month(solar)
 
-    # Get snapshots since last true-up anniversary
-    from config import get_billing_config
     billing_cfg = get_billing_config()
     trueup_month = billing_cfg.get('trueup_month', 1)
     now = datetime.now()
@@ -700,7 +711,8 @@ async def api_billing():
         since = f"{now.year - 1}-{trueup_month:02d}"
 
     snapshots = get_monthly_billing(since_month=since)
-    trueup = estimate_trueup(snapshots)
+    current_nem = current.get('nem_charges_to_date', 0)
+    trueup = estimate_trueup(snapshots, current_month_nem=current_nem)
 
     return {
         'current_month': current,
@@ -709,50 +721,50 @@ async def api_billing():
     }
 
 
-@app.post("/api/billing/actual")
-async def api_billing_actual(month: str, amount: float):
-    """Record actual PG&E bill for accuracy comparison."""
-    from data_store import update_actual_bill
-    update_actual_bill(month, amount)
-    return {"status": "ok", "month": month, "actual": amount}
-
-
 @app.post("/api/billing/snapshot")
 async def api_billing_snapshot():
-    """Take end-of-month billing snapshot. Call on last day of month or start of next."""
-    from datetime import datetime, timedelta
-    from billing import estimate_current_month
+    """Take monthly billing snapshot from solar data."""
+    from datetime import datetime
+    from billing import calculate_billing_from_solar
     from data_store import store_monthly_billing
-    from config import get_billing_config
 
     now = datetime.now()
-    # Snapshot for current month
     month_str = now.strftime('%Y-%m')
     days = now.day
 
-    # Get full month data
-    history = await fetch_history(days)
     solar = await fetch_solar(days)
+    billing = calculate_billing_from_solar(solar, days)
 
-    estimate = estimate_current_month(history, solar)
-    billing_cfg = get_billing_config()
-    base_charge = billing_cfg.get('base_services_charge', 24.49)
+    if not billing:
+        return {"status": "error", "message": "Solar data unavailable"}
 
     store_monthly_billing(
         month=month_str,
-        grid_cost=estimate['grid_cost_to_date'],
-        export_credit=estimate['export_credits_to_date'],
-        net_energy_cost=estimate['energy_cost_to_date'],
-        base_charge=base_charge,
-        total_bill=estimate['energy_cost_to_date'] + base_charge,
+        nem_charges=billing['nem_charges'],
+        generation_charges=billing['generation_charges'],
+        fixed_charges=billing['fixed_charges'],
+        grid_import_kwh=billing['grid_import_kwh'],
+        grid_export_kwh=billing['grid_export_kwh'],
+        net_kwh=billing['net_kwh'],
+        grid_cost=billing['delivery_cost_gross'],
+        export_credit=billing['export_credits'],
+        net_energy_cost=billing['nem_charges'],
+        base_charge=billing['fixed_charges'],
+        total_bill=billing['monthly_electric_bill'],
         days=days,
     )
 
-    return {
-        "status": "ok",
-        "month": month_str,
-        "snapshot": estimate,
-    }
+    return {"status": "ok", "month": month_str, "billing": billing}
+
+
+@app.post("/api/billing/actual")
+async def api_billing_actual(month: str, amount: float, electric: float = None):
+    """Record actual PG&E bill. Optionally separate electric from gas."""
+    from data_store import update_actual_bill, update_actual_electric
+    update_actual_bill(month, amount)
+    if electric is not None:
+        update_actual_electric(month, electric)
+    return {"status": "ok", "month": month, "total": amount, "electric": electric}
 
 
 # ==========================================
