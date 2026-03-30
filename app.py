@@ -676,6 +676,85 @@ async def api_ev_history(days: int = 7):
     return data
 
 
+@app.get("/api/billing")
+async def api_billing():
+    """Bill estimation and true-up tracking."""
+    from datetime import datetime
+    from billing import estimate_current_month, estimate_trueup
+    from data_store import get_monthly_billing
+
+    days_so_far = datetime.now().day
+    history = await fetch_history(days_so_far)
+    solar = await fetch_solar(days_so_far)
+
+    current = estimate_current_month(history, solar)
+
+    # Get snapshots since last true-up anniversary
+    from config import get_billing_config
+    billing_cfg = get_billing_config()
+    trueup_month = billing_cfg.get('trueup_month', 1)
+    now = datetime.now()
+    if now.month >= trueup_month:
+        since = f"{now.year}-{trueup_month:02d}"
+    else:
+        since = f"{now.year - 1}-{trueup_month:02d}"
+
+    snapshots = get_monthly_billing(since_month=since)
+    trueup = estimate_trueup(snapshots)
+
+    return {
+        'current_month': current,
+        'trueup': trueup,
+        'history': snapshots,
+    }
+
+
+@app.post("/api/billing/actual")
+async def api_billing_actual(month: str, amount: float):
+    """Record actual PG&E bill for accuracy comparison."""
+    from data_store import update_actual_bill
+    update_actual_bill(month, amount)
+    return {"status": "ok", "month": month, "actual": amount}
+
+
+@app.post("/api/billing/snapshot")
+async def api_billing_snapshot():
+    """Take end-of-month billing snapshot. Call on last day of month or start of next."""
+    from datetime import datetime, timedelta
+    from billing import estimate_current_month
+    from data_store import store_monthly_billing
+    from config import get_billing_config
+
+    now = datetime.now()
+    # Snapshot for current month
+    month_str = now.strftime('%Y-%m')
+    days = now.day
+
+    # Get full month data
+    history = await fetch_history(days)
+    solar = await fetch_solar(days)
+
+    estimate = estimate_current_month(history, solar)
+    billing_cfg = get_billing_config()
+    base_charge = billing_cfg.get('base_services_charge', 24.49)
+
+    store_monthly_billing(
+        month=month_str,
+        grid_cost=estimate['grid_cost_to_date'],
+        export_credit=estimate['export_credits_to_date'],
+        net_energy_cost=estimate['energy_cost_to_date'],
+        base_charge=base_charge,
+        total_bill=estimate['energy_cost_to_date'] + base_charge,
+        days=days,
+    )
+
+    return {
+        "status": "ok",
+        "month": month_str,
+        "snapshot": estimate,
+    }
+
+
 # ==========================================
 # WebSocket — Live Power Flow
 # ==========================================

@@ -79,6 +79,23 @@ def init_database():
         )
     ''')
 
+    # Monthly billing snapshots for true-up tracking
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS monthly_billing (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            month TEXT UNIQUE NOT NULL,
+            grid_cost REAL NOT NULL,
+            export_credit REAL NOT NULL,
+            net_energy_cost REAL NOT NULL,
+            base_charge REAL NOT NULL,
+            total_bill REAL NOT NULL,
+            actual_bill REAL,
+            days INTEGER NOT NULL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
     # Create indexes for common queries
     cursor.execute('''
         CREATE INDEX IF NOT EXISTS idx_hourly_timestamp
@@ -422,6 +439,60 @@ def get_register_history(register_name: str, days: int = 30) -> List[Dict]:
             })
 
     return result
+
+
+def store_monthly_billing(month, grid_cost, export_credit, net_energy_cost, base_charge, total_bill, days):
+    """Store or update a monthly billing snapshot."""
+    init_database()
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        INSERT INTO monthly_billing (month, grid_cost, export_credit, net_energy_cost, base_charge, total_bill, days, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(month) DO UPDATE SET
+            grid_cost=excluded.grid_cost,
+            export_credit=excluded.export_credit,
+            net_energy_cost=excluded.net_energy_cost,
+            base_charge=excluded.base_charge,
+            total_bill=excluded.total_bill,
+            days=excluded.days,
+            updated_at=CURRENT_TIMESTAMP
+    ''', (month, grid_cost, export_credit, net_energy_cost, base_charge, total_bill, days))
+    conn.commit()
+    conn.close()
+
+
+def get_monthly_billing(since_month=None):
+    """Get monthly billing snapshots, optionally filtered by start month."""
+    init_database()
+    conn = get_connection()
+    cursor = conn.cursor()
+    if since_month:
+        cursor.execute('SELECT * FROM monthly_billing WHERE month >= ? ORDER BY month', (since_month,))
+    else:
+        cursor.execute('SELECT * FROM monthly_billing ORDER BY month')
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
+
+
+def update_actual_bill(month, amount):
+    """Record actual PG&E bill amount for accuracy comparison."""
+    init_database()
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        UPDATE monthly_billing SET actual_bill = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE month = ?
+    ''', (amount, month))
+    if cursor.rowcount == 0:
+        # No snapshot exists yet for this month, create a minimal one
+        cursor.execute('''
+            INSERT INTO monthly_billing (month, grid_cost, export_credit, net_energy_cost, base_charge, total_bill, actual_bill, days)
+            VALUES (?, 0, 0, 0, 0, 0, ?, 0)
+        ''', (month, amount))
+    conn.commit()
+    conn.close()
 
 
 # Initialize database on module import

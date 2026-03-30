@@ -55,6 +55,12 @@ def get_config():
     return _load_config()
 
 
+def get_billing_config():
+    """Get billing cycle configuration."""
+    cfg = _load_config()
+    return cfg.get('billing', {})
+
+
 def is_solar_enabled():
     """Check if solar integration is enabled in config."""
     cfg = _load_config()
