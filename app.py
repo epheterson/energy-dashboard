@@ -788,6 +788,26 @@ async def api_battery_cap():
         return {"error": str(e)}
 
 
+@app.get("/api/battery/prediction-log")
+async def api_prediction_log():
+    """Log current prediction with actual conditions for audit trail."""
+    from solar_forecast import recommend_charge_cap
+    from datetime import datetime
+    import json as json_mod
+
+    loop = asyncio.get_event_loop()
+    prediction = await loop.run_in_executor(None, recommend_charge_cap)
+    prediction['logged_at'] = datetime.now().isoformat()
+
+    # Append to audit log file
+    log_path = Path(__file__).parent / 'data' / 'prediction_audit.jsonl'
+    log_path.parent.mkdir(exist_ok=True)
+    with open(log_path, 'a') as f:
+        f.write(json_mod.dumps(prediction) + '\n')
+
+    return {"status": "logged", "prediction": prediction}
+
+
 # ==========================================
 # WebSocket — Live Power Flow
 # ==========================================

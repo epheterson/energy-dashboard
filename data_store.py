@@ -557,5 +557,36 @@ def update_actual_electric(month, electric_amount):
     conn.close()
 
 
+def log_billing_audit(month, estimated, actual_bill=None, actual_electric=None, prediction_data=None):
+    """Log billing estimate vs actual for accuracy tracking."""
+    init_database()
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS billing_audit (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            month TEXT NOT NULL,
+            estimated_nem REAL,
+            estimated_generation REAL,
+            estimated_monthly REAL,
+            actual_bill REAL,
+            actual_electric REAL,
+            prediction_data TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    cursor.execute('''
+        INSERT INTO billing_audit (month, estimated_nem, estimated_generation, estimated_monthly, actual_bill, actual_electric, prediction_data)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    ''', (month,
+          estimated.get('nem_charges_to_date', 0),
+          estimated.get('generation_charges_to_date', 0),
+          estimated.get('monthly_electric_bill_to_date', 0),
+          actual_bill, actual_electric,
+          json.dumps(prediction_data) if prediction_data else None))
+    conn.commit()
+    conn.close()
+
+
 # Initialize database on module import
 init_database()
