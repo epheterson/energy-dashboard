@@ -34,7 +34,7 @@ def estimate_current_month(history_data, solar_data):
     export_credit = 0
     net_energy_cost = total_grid_cost
     if isinstance(solar_data, dict) and 'error' not in solar_data:
-        export_credit = solar_data.get('total_export_credit', 0)
+        export_credit = solar_data.get('export_credit', solar_data.get('total_export_credit', 0))
         net_energy_cost = solar_data.get('net_cost', total_grid_cost)
 
     # Project full month from daily rate
