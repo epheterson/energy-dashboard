@@ -9,6 +9,7 @@ import json
 import subprocess
 from datetime import datetime, timedelta
 from collections import defaultdict
+from pathlib import Path
 
 from config import get_tou_period, get_config
 from solar_integration import HA_URL, get_ha_token
@@ -51,14 +52,61 @@ def _get_tesla_config():
     return site_id, token
 
 
+CACHE_DIR = Path(__file__).parent / 'data'
+CACHE_TTL_HOURS = 6  # Tesla data barely changes intraday — 4 calls/day max
+
+
+def _get_cache_path(days):
+    """Get cache file path for a given day count."""
+    return CACHE_DIR / f'tesla_energy_{days}d.json'
+
+
+def _read_cache(days):
+    """Read cached Tesla data if fresh enough."""
+    cache_path = _get_cache_path(days)
+    if not cache_path.exists():
+        return None
+    try:
+        with open(cache_path) as f:
+            cached = json.load(f)
+        cached_at = datetime.fromisoformat(cached.get('_cached_at', '2000-01-01'))
+        age_hours = (datetime.now() - cached_at).total_seconds() / 3600
+        if age_hours < CACHE_TTL_HOURS:
+            print(f"Tesla data from cache ({age_hours:.1f}h old, TTL {CACHE_TTL_HOURS}h)")
+            return cached
+    except Exception:
+        pass
+    return None
+
+
+def _write_cache(days, data):
+    """Write Tesla data to cache."""
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    cache_path = _get_cache_path(days)
+    data['_cached_at'] = datetime.now().isoformat()
+    try:
+        with open(cache_path, 'w') as f:
+            json.dump(data, f)
+    except Exception:
+        pass
+
+
 def fetch_tesla_energy(days=30):
     """Fetch daily energy data from Tesla Fleet API.
+
+    Caches results for 6 hours to stay well within API rate limits.
+    Tesla calendar_history data changes at most once per day.
 
     Args:
         days: Number of days of history to fetch.
 
     Returns dict with daily energy data aggregated by TOU period, or None on failure.
     """
+    # Check cache first
+    cached = _read_cache(days)
+    if cached:
+        return cached
+
     site_id, token = _get_tesla_config()
     if not site_id or not token:
         return None
@@ -73,6 +121,7 @@ def fetch_tesla_energy(days=30):
         f"&time_zone=America/Los_Angeles"
     )
 
+    print(f"Tesla API call: fetching {days}d energy data")
     try:
         cmd = [
             'curl', '-s', '-H', f'Authorization: Bearer {token}',
@@ -155,7 +204,7 @@ def fetch_tesla_energy(days=30):
     total_solar = sum(d['solar'] for d in daily.values())
     total_consumption = sum(d['consumption'] for d in daily.values())
 
-    return {
+    result = {
         'source': 'tesla_fleet_api',
         'days': len(daily),
         'grid_import_kwh': round(total_grid_import, 1),
@@ -174,3 +223,5 @@ def fetch_tesla_energy(days=30):
             for period, t in by_tou.items()
         },
     }
+    _write_cache(days, result)
+    return result
