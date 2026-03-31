@@ -686,13 +686,20 @@ tr:last-child td { border-bottom: none; }
 
 @media (max-width: 768px) {
   .container { padding: 12px; }
-  .power-flow { grid-template-columns: 1fr 1fr; gap: 10px; }
-  .stats-row { grid-template-columns: 1fr 1fr !important; gap: 10px; }
-  .flow-card { padding: 14px; }
-  .flow-card .value { font-size: 24px; }
-  .stat-card { padding: 12px 14px; }
-  .stat-card .value { font-size: 24px; }
-  .stat-card .label { font-size: 11px; }
+  /* Hero band: stack vertically on mobile */
+  .hero-band { flex-direction: column; gap: 12px; padding: 16px; }
+  .hero-left { text-align: left; min-width: auto; }
+  .hero-cost { font-size: 32px; }
+  .hero-flow { flex-wrap: wrap; gap: 4px; justify-content: flex-start; }
+  .flow-node { min-width: 60px; }
+  .flow-val { font-size: 18px; }
+  .flow-arrow { font-size: 14px; }
+  .hero-right { flex-direction: row; flex-wrap: wrap; gap: 12px; }
+  /* Sub-bar: wrap on mobile */
+  .sub-bar { flex-wrap: wrap; }
+  .sub-item { flex: 0 0 calc(33.3% - 1px); padding: 8px; }
+  .sub-val { font-size: 13px; }
+  .sub-label { font-size: 9px; }
   .state-badge { display: none; }
   .panel-header { padding: 12px 14px; flex-wrap: wrap; gap: 8px; }
   .panel-header h2 { font-size: 13px; }
@@ -2410,50 +2417,42 @@ async function loadBilling() {
 function updateBillingPanel(d) {
   const cm = d.current_month || {};
   const tu = d.trueup || {};
+  const $ = id => document.getElementById(id);
 
   // Monthly bill estimate
-  const projected = cm.projections?.projected_total;
-  document.getElementById('billingMonthlyTotal').textContent = projected != null ? '$' + projected.toFixed(2) : '--';
-  document.getElementById('billingMonthlyPeriod').textContent = cm.period || 'projected this month';
+  $('billingMonthlyTotal').textContent = cm.projected_monthly_bill != null ? '$' + cm.projected_monthly_bill.toFixed(2) : '--';
+  $('billingMonthlyPeriod').textContent = cm.period || '';
 
   // Breakdown
-  const gen = cm.generation;
-  document.getElementById('billingGeneration').textContent = gen != null ? '$' + gen.toFixed(2) : '--';
-  document.getElementById('billingFixed').textContent = cm.fixed_charges != null ? '$' + cm.fixed_charges.toFixed(2) : '--';
+  $('billingGeneration').textContent = cm.generation_charges_to_date != null ? '$' + cm.generation_charges_to_date.toFixed(2) : '--';
+  $('billingFixed').textContent = cm.fixed_charges_to_date != null ? '$' + cm.fixed_charges_to_date.toFixed(2) : '--';
 
   // NEM (deferred)
-  const nem = cm.nem;
-  if (nem != null) {
-    const nemVal = typeof nem === 'object' ? (nem.total || nem.charges || 0) : nem;
-    document.getElementById('billingNem').textContent = '$' + Number(nemVal).toFixed(2);
-  } else {
-    document.getElementById('billingNem').textContent = '--';
-  }
+  $('billingNem').textContent = cm.nem_charges_to_date != null ? '$' + cm.nem_charges_to_date.toFixed(2) : '--';
 
   // Grid import/export
-  const imp = cm.projections?.import_kwh ?? cm.import_kwh;
-  const exp = cm.projections?.export_kwh ?? cm.export_kwh;
-  document.getElementById('billingImportKwh').textContent = imp != null ? imp.toFixed(1) + ' kWh' : '--';
-  document.getElementById('billingExportKwh').textContent = exp != null ? exp.toFixed(1) + ' kWh' : '--';
+  $('billingImportKwh').textContent = cm.grid_import_kwh != null ? cm.grid_import_kwh.toFixed(1) + ' kWh' : '--';
+  $('billingExportKwh').textContent = cm.grid_export_kwh != null ? cm.grid_export_kwh.toFixed(1) + ' kWh' : '--';
 
   // Last month comparison
-  const last = cm.last_month_actual ?? cm.projections?.last_month;
-  document.getElementById('billingLastMonth').textContent = last != null ? '$' + Number(last).toFixed(2) : '--';
+  const history = d.history || [];
+  const lastMonth = history.find(h => h.actual_electric != null);
+  $('billingLastMonth').textContent = lastMonth ? '$' + Number(lastMonth.actual_electric).toFixed(2) : '--';
 
   // True-up tracker
-  document.getElementById('trueupProjected').textContent = tu.projected_annual != null ? '$' + tu.projected_annual.toFixed(2) : '--';
+  $('trueupProjected').textContent = tu.projected_trueup != null ? '$' + tu.projected_trueup.toFixed(2) : '--';
 
   const monthsElapsed = tu.months_elapsed || 0;
-  document.getElementById('trueupProgressFill').style.width = ((monthsElapsed / 12) * 100).toFixed(1) + '%';
-  document.getElementById('trueupMonthsElapsed').textContent = monthsElapsed + ' month' + (monthsElapsed !== 1 ? 's' : '');
+  $('trueupProgressFill').style.width = ((monthsElapsed / 12) * 100).toFixed(1) + '%';
+  $('trueupMonthsElapsed').textContent = monthsElapsed + ' month' + (monthsElapsed !== 1 ? 's' : '');
 
-  document.getElementById('trueupMonthlyAvg').textContent = tu.monthly_avg_nem != null ? '$' + tu.monthly_avg_nem.toFixed(2) : '--';
-  document.getElementById('trueupYtd').textContent = tu.ytd_total != null ? '$' + tu.ytd_total.toFixed(2) : '--';
-  document.getElementById('trueupPgeYtd').textContent = tu.pge_reported_ytd != null ? '$' + tu.pge_reported_ytd.toFixed(2) : '--';
+  $('trueupMonthlyAvg').textContent = tu.monthly_avg_nem != null ? '$' + tu.monthly_avg_nem.toFixed(2) : '--';
+  $('trueupYtd').textContent = tu.ytd_nem_charges != null ? '$' + tu.ytd_nem_charges.toFixed(2) : '--';
+  $('trueupPgeYtd').textContent = '--'; // Manually entered
 
   // Color the projected true-up
-  const trueupEl = document.getElementById('trueupProjected');
-  if (tu.projected_annual != null) {
+  const trueupEl = $('trueupProjected');
+  if (tu.projected_trueup != null) {
     trueupEl.style.color = tu.projected_annual <= 0 ? 'var(--green)' : tu.projected_annual > 200 ? 'var(--red)' : 'var(--yellow)';
   }
 }
