@@ -1210,13 +1210,15 @@ function updateLive(d) {
   // Power flow cards (auto-scale W/kW)
   const setSmart = (id, watts) => {
     const el = document.getElementById(id);
-    const unit = el.closest('.flow-card').querySelector('.unit');
+    if (!el) return;
+    const container = el.closest('.flow-node') || el.closest('.flow-card');
+    const unit = container ? container.querySelector('.flow-unit') || container.querySelector('.unit') : null;
     if (Math.abs(watts) >= 1000) {
       el.textContent = (watts / 1000).toFixed(1);
-      unit.textContent = 'kW';
+      if (unit) unit.textContent = 'kW';
     } else {
       el.textContent = fmt(watts);
-      unit.textContent = 'W';
+      if (unit) unit.textContent = 'W';
     }
   };
   setSmart('solarW', d.solar_w);
