@@ -107,46 +107,60 @@ header h1 {
 
 /* ---- Power Flow ---- */
 
-.power-flow {
-  display: grid;
-  grid-template-columns: 1fr 1fr 1fr 1fr;
-  gap: 16px;
-  margin-bottom: 24px;
-}
-
-.flow-card {
+/* Hero Band */
+.hero-band {
+  display: flex;
+  align-items: center;
+  gap: 24px;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 20px;
-  text-align: center;
-}
-
-.flow-card .label {
-  font-size: 12px;
-  color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 1px;
+  border-radius: 8px;
+  padding: 20px 24px;
   margin-bottom: 8px;
 }
-
-.flow-card .value {
-  font-size: 32px;
+.hero-left { flex: 0 0 auto; min-width: 120px; }
+.hero-cost {
+  font-size: 40px;
   font-weight: 700;
-  letter-spacing: -1px;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -2px;
 }
+.hero-label { font-size: 12px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+.hero-flow { flex: 1; display: flex; align-items: center; justify-content: center; gap: 8px; }
+.flow-node { display: flex; flex-direction: column; align-items: center; min-width: 80px; }
+.flow-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); margin-bottom: 2px; }
+.flow-val { font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -0.5px; }
+.flow-unit { font-size: 11px; color: var(--text-muted); }
+.flow-soc { font-size: 11px; color: var(--text-muted); }
+.flow-arrow { font-size: 18px; color: var(--text-muted); opacity: 0.5; }
+.flow-node.solar .flow-val { color: var(--solar); }
+.flow-node.battery .flow-val { color: var(--battery-color); }
+.flow-node.home .flow-val { color: var(--accent); }
+.flow-node.grid .flow-val { color: var(--grid-color); }
+.flow-node.grid.exporting .flow-val { color: var(--green); }
+.hero-right { flex: 0 0 auto; display: flex; flex-direction: column; gap: 6px; min-width: 120px; }
+.hero-metric { display: flex; align-items: baseline; gap: 6px; }
+.hero-metric-val { font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.hero-metric-unit { font-size: 11px; color: var(--text-muted); }
 
-.flow-card .unit {
-  font-size: 14px;
-  color: var(--text-muted);
-  font-weight: 400;
+/* Sub-bar */
+.sub-bar {
+  display: flex;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 16px;
+  overflow: hidden;
 }
+.sub-item { flex: 1; display: flex; flex-direction: column; align-items: center; padding: 10px 12px; border-right: 1px solid var(--border); }
+.sub-item:last-child { border-right: none; }
+.sub-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); margin-bottom: 2px; }
+.sub-val { font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
 
-.flow-card.solar .value { color: var(--solar); }
-.flow-card.battery .value { color: var(--battery-color); }
-.flow-card.home .value { color: var(--accent); }
-.flow-card.grid .value { color: var(--grid-color); }
-.flow-card.grid.exporting .value { color: var(--green); }
+/* Old power-flow cards hidden */
+.power-flow { display: none; }
+.flow-card { display: none; }
 
 .soc-bar {
   width: 100%;
@@ -167,9 +181,7 @@ header h1 {
 /* ---- Stats Row ---- */
 
 .stats-row {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 16px;
+  display: none; /* replaced by hero-band + sub-bar */
   margin-bottom: 24px;
 }
 
@@ -869,76 +881,43 @@ tr:last-child td { border-bottom: none; }
   <div style="font-size:13px;color:var(--text-muted)" id="lastUpdate">Connecting...</div>
 </header>
 
-<!-- Live Power Flow -->
-<div class="power-flow">
-  <div class="flow-card solar">
-    <div class="label">Solar</div>
-    <div class="value"><span id="solarW">--</span> <span class="unit">W</span></div>
+<!-- Hero Band -->
+<div class="hero-band">
+  <div class="hero-left">
+    <div class="hero-cost" id="todayCost">--</div>
+    <div class="hero-label"><span id="dayCostLabel">today</span> <span id="todayCostSub" style="color:var(--text-muted)"></span></div>
   </div>
-  <div class="flow-card battery" id="batteryCard">
-    <div class="label">Battery</div>
-    <div class="value"><span id="batteryW">--</span> <span class="unit">W</span></div>
-    <div class="soc-bar"><div class="fill" id="socFill" style="width:0%"></div></div>
-    <div style="font-size:12px;color:var(--text-muted);margin-top:4px"><span id="socPct">--</span>%</div>
+  <div class="hero-flow" data-solar>
+    <div class="flow-node solar"><span class="flow-label">Solar</span><span class="flow-val" id="solarW">--</span><span class="flow-unit">W</span></div>
+    <span class="flow-arrow">→</span>
+    <div class="flow-node battery" id="batteryCard"><span class="flow-label">Battery</span><span class="flow-val" id="batteryW">--</span><span class="flow-unit">W</span><div class="soc-bar" style="margin-top:4px"><div class="fill" id="socFill" style="width:0%"></div></div><span class="flow-soc"><span id="socPct">--</span>%</span></div>
+    <span class="flow-arrow">→</span>
+    <div class="flow-node home"><span class="flow-label">Home</span><span class="flow-val" id="homeW">--</span><span class="flow-unit">W</span></div>
+    <span class="flow-arrow">→</span>
+    <div class="flow-node grid" id="gridCard"><span class="flow-label">Grid</span><span class="flow-val" id="gridW">--</span><span class="flow-unit">W</span><span class="flow-soc" id="gridDir">--</span></div>
   </div>
-  <div class="flow-card home">
-    <div class="label">Home</div>
-    <div class="value"><span id="homeW">--</span> <span class="unit">W</span></div>
-  </div>
-  <div class="flow-card grid" id="gridCard">
-    <div class="label">Grid</div>
-    <div class="value"><span id="gridW">--</span> <span class="unit">W</span></div>
-    <div style="font-size:12px;color:var(--text-muted);margin-top:4px" id="gridDir">--</div>
-  </div>
-</div>
-
-<!-- Stats -->
-<div class="stats-row">
-  <div class="stat-card">
-    <div class="label" id="dayCostLabel">Today's Cost</div>
-    <div class="value" id="todayCost">--</div>
-    <div class="sub" id="todayCostSub"></div>
-  </div>
-  <div class="stat-card">
-    <div class="label" id="dayUsageLabel">Today's Usage</div>
-    <div class="value" id="todayKwh">--</div>
-    <div class="sub">kWh</div>
-  </div>
-  <div class="stat-card" data-solar>
-    <div class="label">Solar + Battery Savings</div>
-    <div class="value" style="color:var(--green)" id="solarSavings">--</div>
-    <div class="sub" id="solarSavingsSub">this week</div>
-  </div>
-  <div class="stat-card" data-solar>
-    <div class="label">Self-Sufficiency</div>
-    <div class="value" style="color:var(--solar)" id="selfSuff">--</div>
-    <div class="sub" id="selfSuffSub">non-grid</div>
+  <div class="hero-right">
+    <div class="hero-metric"><span class="hero-metric-val" id="todayKwh">--</span><span class="hero-metric-unit" id="dayUsageLabel">kWh today</span></div>
+    <div class="hero-metric" data-solar><span class="hero-metric-val" style="color:var(--green)" id="solarSavings">--</span><span class="hero-metric-unit" id="solarSavingsSub">savings</span></div>
+    <div class="hero-metric" data-solar><span class="hero-metric-val" style="color:var(--solar)" id="selfSuff">--</span><span class="hero-metric-unit" id="selfSuffSub">self-sufficient</span></div>
   </div>
 </div>
 
-<!-- Battery Economics (compact row) -->
-<div class="stats-row" id="batteryStatsRow" data-solar style="display:none">
-  <div class="stat-card">
-    <div class="label">Battery Cost</div>
-    <div class="value" id="batCostPerKwh">--</div>
-    <div class="sub" id="batCostSub">per kWh discharged</div>
-  </div>
-  <div class="stat-card">
-    <div class="label">Charge Source</div>
-    <div class="value" style="color:var(--solar)" id="batSolarPct">--</div>
-    <div class="sub" id="batChargeSub">solar / grid split</div>
-  </div>
-  <div class="stat-card">
-    <div class="label">Round-Trip</div>
-    <div class="value" id="batEfficiency">--</div>
-    <div class="sub" id="batEffSub">efficiency</div>
-  </div>
-  <div class="stat-card">
-    <div class="label">Battery Savings</div>
-    <div class="value" style="color:var(--green)" id="batSavings">--</div>
-    <div class="sub" id="batSavingsSub">vs grid peak rate</div>
-  </div>
+<!-- Sub-bar: Monthly / True-up / Battery stats -->
+<div class="sub-bar">
+  <div class="sub-item" id="subMonthly"><span class="sub-label">Monthly</span><span class="sub-val" id="subMonthlyVal">--</span></div>
+  <div class="sub-item" id="subTrueup"><span class="sub-label">True-up YTD</span><span class="sub-val" id="subTrueupVal">--</span></div>
+  <div class="sub-item" data-solar id="subEfficiency"><span class="sub-label">Efficiency</span><span class="sub-val" id="batEfficiency">--</span></div>
+  <div class="sub-item" data-solar id="subBatCost"><span class="sub-label">Bat $/kWh</span><span class="sub-val" id="batCostPerKwh">--</span></div>
+  <div class="sub-item" data-solar><span class="sub-label">Charge</span><span class="sub-val" style="color:var(--solar)" id="batSolarPct">--</span></div>
+  <div class="sub-item" data-solar><span class="sub-label">Bat Savings</span><span class="sub-val" style="color:var(--green)" id="batSavings">--</span></div>
 </div>
+<!-- Hidden elements for JS compatibility -->
+<span id="batCostSub" style="display:none"></span>
+<span id="batChargeSub" style="display:none"></span>
+<span id="batEffSub" style="display:none"></span>
+<span id="batSavingsSub" style="display:none"></span>
+<div id="batteryStatsRow" data-solar style="display:none"></div>
 
 <!-- EV Charging — compact bar, expands when charging -->
 <div class="ev-bar" id="evBar" data-ev style="display:none">
@@ -2414,6 +2393,12 @@ async function loadBilling() {
     const d = await r.json();
     if (d.error) throw new Error(d.error);
     updateBillingPanel(d);
+    // Also populate sub-bar
+    const cm = d.current_month || {};
+    const tu = d.trueup || {};
+    const el = id => document.getElementById(id);
+    if (el('subMonthlyVal')) el('subMonthlyVal').textContent = cm.projected_monthly_bill != null ? '$' + cm.projected_monthly_bill.toFixed(0) : '--';
+    if (el('subTrueupVal')) el('subTrueupVal').textContent = tu.ytd_nem_charges != null ? '$' + tu.ytd_nem_charges.toFixed(0) : '--';
   } catch (e) {
     console.error('loadBilling error:', e);
     showBillingUnavailable();
