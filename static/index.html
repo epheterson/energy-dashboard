@@ -2514,7 +2514,7 @@ async function loadBatteryForecast() {
 function updateBatteryForecast(d) {
   // Cloud cover
   const sp = d.solar_prediction || {};
-  const cloud = sp.cloud_cover;
+  const cloud = sp.cloud_cover_pct;
   const cloudEl = document.getElementById('forecastCloudPct');
   const iconEl = document.getElementById('forecastCloudIcon');
   if (cloud != null) {
@@ -2529,7 +2529,7 @@ function updateBatteryForecast(d) {
   }
 
   // Predicted solar
-  const predKwh = sp.predicted_kwh;
+  const predKwh = sp.predicted_solar_kwh;
   document.getElementById('forecastSolarKwh').textContent = predKwh != null ? predKwh.toFixed(1) + ' kWh' : '--';
 
   // Recommended cap
