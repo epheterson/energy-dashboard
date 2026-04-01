@@ -838,6 +838,67 @@ async def api_prediction_log():
     return {"status": "logged", "prediction": prediction}
 
 
+@app.get("/api/battery/prediction-history")
+async def api_prediction_history():
+    """Historical predictions with actual solar for accuracy tracking."""
+    import json as json_mod
+    from pathlib import Path
+
+    log_path = Path(__file__).parent / 'data' / 'prediction_audit.jsonl'
+    if not log_path.exists():
+        return {"history": []}
+
+    # Read predictions
+    predictions = []
+    try:
+        with open(log_path) as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    predictions.append(json_mod.loads(line))
+    except Exception:
+        return {"history": []}
+
+    # Get actual solar data from Tesla cache if available
+    actual_solar = {}
+    tesla_cache = Path(__file__).parent / 'data' / 'tesla_energy_30d.json'
+    if tesla_cache.exists():
+        try:
+            with open(tesla_cache) as f:
+                tesla = json_mod.load(f)
+            for date, day_data in tesla.get('daily', {}).items():
+                actual_solar[date] = round(day_data.get('solar', 0), 1)
+        except Exception:
+            pass
+
+    # Build history with actual comparison
+    history = []
+    seen_dates = set()
+    for p in reversed(predictions):  # most recent first
+        sp = p.get('solar_prediction', {})
+        date = sp.get('date', '')
+        if date in seen_dates:
+            continue  # one entry per date
+        seen_dates.add(date)
+
+        actual = actual_solar.get(date)
+        predicted = sp.get('predicted_solar_kwh', 0)
+        error_pct = None
+        if actual and predicted:
+            error_pct = round((actual - predicted) / predicted * 100, 0)
+
+        history.append({
+            'date': date,
+            'predicted_solar': predicted,
+            'actual_solar': actual,
+            'error_pct': error_pct,
+            'cloud_cover': sp.get('cloud_cover_pct'),
+            'recommended_cap': p.get('recommended_cap'),
+        })
+
+    return {"history": history[:14]}  # Last 2 weeks
+
+
 # ==========================================
 # WebSocket — Live Power Flow
 # ==========================================

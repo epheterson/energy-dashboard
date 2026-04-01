@@ -818,6 +818,7 @@ tr:last-child td { border-bottom: none; }
   border: 1px solid var(--border);
   border-radius: 12px;
   padding: 16px 20px;
+  margin-bottom: 24px;
 }
 
 .battery-forecast .forecast-title {
@@ -1051,6 +1052,24 @@ tr:last-child td { border-bottom: none; }
   </div>
   <div class="forecast-reasoning" id="forecastReasoning"></div>
   <div class="forecast-updated" id="forecastUpdated"></div>
+  <div class="forecast-history" id="forecastHistory" style="display:none; margin-top:12px; border-top:1px solid var(--border); padding-top:12px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;cursor:pointer" onclick="toggleForecastHistory()">
+      <span style="font-size:11px;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-muted)">Prediction Accuracy</span>
+      <span id="forecastHistoryChevron" style="font-size:10px;color:var(--text-muted);transition:transform 0.2s">&#9654;</span>
+    </div>
+    <div id="forecastHistoryBody" style="display:none;margin-top:8px;">
+      <table style="width:100%;font-size:12px;">
+        <thead><tr style="color:var(--text-muted)">
+          <th style="text-align:left;font-weight:500;padding:4px 0">Date</th>
+          <th style="text-align:right;font-weight:500">Predicted</th>
+          <th style="text-align:right;font-weight:500">Actual</th>
+          <th style="text-align:right;font-weight:500">Cap</th>
+          <th style="text-align:right;font-weight:500">Filled To</th>
+        </tr></thead>
+        <tbody id="forecastHistoryRows"></tbody>
+      </table>
+    </div>
+  </div>
 </div>
 
 <!-- Circuits Table -->
@@ -2506,6 +2525,7 @@ async function loadBatteryForecast() {
     if (d.error) throw new Error(d.error);
     updateBatteryForecast(d);
     document.getElementById('batteryForecastCard').style.display = '';
+    document.getElementById('forecastHistory').style.display = '';
   } catch (e) {
     console.error('loadBatteryForecast error:', e);
     showForecastUnavailable();
@@ -2558,6 +2578,47 @@ function updateBatteryForecast(d) {
     updEl.textContent = 'Updated ' + t.toLocaleTimeString();
   } else {
     updEl.textContent = '';
+  }
+}
+
+function toggleForecastHistory() {
+  const body = document.getElementById('forecastHistoryBody');
+  const chevron = document.getElementById('forecastHistoryChevron');
+  if (body.style.display === 'none') {
+    body.style.display = '';
+    chevron.style.transform = 'rotate(90deg)';
+    loadForecastHistory();
+  } else {
+    body.style.display = 'none';
+    chevron.style.transform = '';
+  }
+}
+
+async function loadForecastHistory() {
+  try {
+    const r = await fetch('/api/battery/prediction-history');
+    if (!r.ok) return;
+    const d = await r.json();
+    const tbody = document.getElementById('forecastHistoryRows');
+    tbody.innerHTML = '';
+    for (const h of (d.history || [])) {
+      const actual = h.actual_solar != null ? h.actual_solar.toFixed(1) : '--';
+      const errColor = h.error_pct != null ? (Math.abs(h.error_pct) < 20 ? 'var(--green)' : 'var(--yellow)') : 'var(--text-muted)';
+      const errText = h.error_pct != null ? (h.error_pct > 0 ? '+' : '') + h.error_pct + '%' : '--';
+      tbody.innerHTML += `<tr>
+        <td style="padding:4px 0">${h.date?.slice(5) || '--'}</td>
+        <td style="text-align:right;color:var(--solar)">${h.predicted_solar?.toFixed(1) || '--'}</td>
+        <td style="text-align:right">${actual} <span style="font-size:10px;color:${errColor}">${errText}</span></td>
+        <td style="text-align:right;color:var(--green)">${h.recommended_cap || '--'}%</td>
+        <td style="text-align:right;color:var(--text-muted)">--</td>
+      </tr>`;
+    }
+    if (!d.history?.length) {
+      tbody.innerHTML = '<tr><td colspan="5" style="color:var(--text-muted);padding:8px 0">No prediction history yet. Accumulates over time.</td></tr>';
+    }
+    document.getElementById('forecastHistory').style.display = '';
+  } catch(e) {
+    console.error('loadForecastHistory:', e);
   }
 }
 
