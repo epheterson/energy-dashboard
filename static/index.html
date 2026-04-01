@@ -1251,7 +1251,8 @@ function updateLive(d) {
 
   // Battery direction (positive = discharging to home, negative = charging)
   const batCard = document.getElementById('batteryCard');
-  batCard.querySelector('.label').textContent = d.battery_w > BATTERY_IDLE_W ? 'Battery ↓ Discharging' : d.battery_w < -BATTERY_IDLE_W ? 'Battery ↑ Charging' : 'Battery — Idle';
+  const batLabel = batCard.querySelector('.flow-label') || batCard.querySelector('.label');
+  if (batLabel) batLabel.textContent = d.battery_w > BATTERY_IDLE_W ? 'Battery ↓' : d.battery_w < -BATTERY_IDLE_W ? 'Battery ↑' : 'Battery';
 
   // Grid direction
   const gridCard = document.getElementById('gridCard');
