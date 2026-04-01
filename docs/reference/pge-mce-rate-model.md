@@ -111,11 +111,12 @@ Annual gas total (Feb 2025 - Jan 2026): $594.38. Monthly average: ~$49.53.
 
 Applied twice per year to electric bills, once per year to gas:
 
-| Month | Electric Credit | Gas Credit | Total |
-|-------|----------------|------------|-------|
-| April | -$58.23 | -$67.03 | -$125.26 |
-| October | -$58.23 | $0.00 | -$58.23 |
-| **Annual** | **-$116.46** | **-$67.03** | **-$183.49** |
+| Month | Electric Credit | Gas Credit | Total | Notes |
+|-------|----------------|------------|-------|-------|
+| April 2025 | -$58.23 | -$67.03 | -$125.26 | |
+| October 2025 | -$58.23 | $0.00 | -$58.23 | |
+| April 2026 | TBD | -$46.26 | TBD | Gas credit reduced from $67.03 |
+| **2025 Annual** | **-$116.46** | **-$67.03** | **-$183.49** | |
 
 ---
 
