@@ -723,10 +723,40 @@ async def api_billing():
     current_nem = current.get('nem_charges_to_date', 0)
     trueup = estimate_trueup(snapshots, current_month_nem=current_nem)
 
+    # Gas data from PG&E/Opower via HA
+    gas = None
+    try:
+        from solar_integration import HA_URL, get_ha_token
+        ha_token = get_ha_token()
+        if ha_token:
+            gas_sensors = {
+                'cost_to_date': 'sensor.gas_account_4727821245_current_bill_gas_cost_to_date',
+                'forecasted_cost': 'sensor.gas_account_4727821245_current_bill_gas_forecasted_cost',
+                'usage_to_date': 'sensor.gas_account_4727821245_current_bill_gas_usage_to_date',
+                'forecasted_usage': 'sensor.gas_account_4727821245_current_bill_gas_forecasted_usage',
+                'typical_cost': 'sensor.gas_account_4727821245_typical_monthly_gas_cost',
+            }
+            import subprocess, json as _json
+            gas = {}
+            for key, entity in gas_sensors.items():
+                cmd = ['curl', '-sf', '--max-time', '5',
+                       '-H', f'Authorization: Bearer {ha_token}',
+                       f'{HA_URL}/api/states/{entity}']
+                r = subprocess.run(cmd, capture_output=True, text=True, timeout=8)
+                if r.returncode == 0:
+                    state = _json.loads(r.stdout).get('state', '0')
+                    try:
+                        gas[key] = float(state)
+                    except (ValueError, TypeError):
+                        gas[key] = None
+    except Exception as e:
+        print(f"Gas data fetch skipped: {e}")
+
     return {
         'current_month': current,
         'trueup': trueup,
         'history': snapshots,
+        'gas': gas,
     }
 
 

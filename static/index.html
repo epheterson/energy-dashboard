@@ -984,6 +984,20 @@ tr:last-child td { border-bottom: none; }
         <span class="billing-line-label">Last Month Actual</span>
         <span class="billing-line-value" id="billingLastMonth">--</span>
       </div>
+      <div class="billing-divider"></div>
+      <div class="billing-line">
+        <span class="billing-line-label" style="color:var(--orange)">Gas (PG&E)</span>
+        <span class="billing-line-value" id="billingGasCost">--</span>
+      </div>
+      <div class="billing-line">
+        <span class="billing-line-label" style="font-size:12px;color:var(--text-muted)">Gas forecast</span>
+        <span class="billing-line-value" style="font-size:13px" id="billingGasForecast">--</span>
+      </div>
+      <div class="billing-divider"></div>
+      <div class="billing-line" style="font-weight:600">
+        <span class="billing-line-label">Total Bill Estimate</span>
+        <span class="billing-line-value" id="billingTotalWithGas">--</span>
+      </div>
     </div>
   </div>
   <div class="billing-card" id="billingTrueupCard">
@@ -2449,6 +2463,17 @@ function updateBillingPanel(d) {
   $('trueupMonthlyAvg').textContent = tu.monthly_avg_nem != null ? '$' + tu.monthly_avg_nem.toFixed(2) : '--';
   $('trueupYtd').textContent = tu.ytd_nem_charges != null ? '$' + tu.ytd_nem_charges.toFixed(2) : '--';
   $('trueupPgeYtd').textContent = '--'; // Manually entered
+
+  // Gas data
+  const gas = d.gas;
+  if (gas) {
+    $('billingGasCost').textContent = gas.cost_to_date != null ? '$' + gas.cost_to_date.toFixed(0) : '--';
+    $('billingGasForecast').textContent = gas.forecasted_cost != null ? '~$' + gas.forecasted_cost.toFixed(0) + '/mo' : '--';
+    // Total bill = electric + gas forecast
+    const elecBill = cm.projected_monthly_bill || 0;
+    const gasForecast = gas.forecasted_cost || 0;
+    $('billingTotalWithGas').textContent = '$' + (elecBill + gasForecast).toFixed(0);
+  }
 
   // Color the projected true-up
   const trueupEl = $('trueupProjected');
