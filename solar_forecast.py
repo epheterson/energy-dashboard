@@ -133,16 +133,16 @@ def recommend_charge_cap():
 
     predicted_kwh = prediction['predicted_solar_kwh']
 
-    # How much of the battery can predicted solar fill?
-    # Not all solar goes to battery — home consumes some directly
-    # Typically ~60% of solar goes to battery (rest powers home)
-    solar_to_battery_kwh = predicted_kwh * 0.60
+    # Goal: set cap so solar fills battery to ~98-100% by afternoon
+    # Home consumes ~65-70% of solar directly; ~30-35% goes to battery
+    # Calibrated from April 1: 34 kWh solar, 11 kWh to battery = 32%
+    solar_to_battery_kwh = predicted_kwh * 0.33
     solar_fill_pct = solar_to_battery_kwh / BATTERY_CAPACITY_KWH * 100
 
-    # Cap = 100% minus solar headroom, but stay within bounds
-    # Minimum 50% (always some grid charging for reliability)
-    # Maximum 90% (always some solar headroom)
-    recommended_cap = max(50, min(90, int(100 - solar_fill_pct)))
+    # Cap = 100% minus solar fill (so grid + solar = ~100%)
+    # Minimum 40% (sunniest day still needs baseline)
+    # Maximum 90% (cloudy days need more grid)
+    recommended_cap = max(40, min(90, int(100 - solar_fill_pct)))
 
     # Calculate economics
     # Grid off-peak: ~$0.28/kWh. Solar: $0.00
