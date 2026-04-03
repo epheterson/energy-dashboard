@@ -19,36 +19,35 @@ TESLA_API_BASE = "https://fleet-api.prd.na.vn.cloud.tesla.com"
 
 
 def _get_tesla_token_from_ha():
-    """Read Tesla Fleet OAuth token from HA's config entries via API."""
+    """Read Tesla Fleet OAuth token from HA's config entries.
+
+    HA auto-refreshes the Tesla Fleet token. The config entries file
+    is mounted read-only into this container at /app/ha_config_entries.json.
+    No manual token refresh needed — always uses HA's current token.
+    """
+    ha_config = Path("/app/ha_config_entries.json")
+    if not ha_config.exists():
+        return None
     try:
-        token = get_ha_token()
-        if not token:
-            return None
-        cmd = [
-            'curl', '-s',
-            '-H', f'Authorization: Bearer {token}',
-            f'{HA_URL}/api/config/config_entries/entry'
-        ]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
-        entries = json.loads(result.stdout)
-        for entry in entries:
+        data = json.loads(ha_config.read_text())
+        for entry in data.get('data', {}).get('entries', []):
             if entry.get('domain') == 'tesla_fleet':
-                # Entry data isn't exposed via this API, but we can try
-                # the internal storage path
-                break
-    except Exception:
-        pass
+                token = entry['data']['token']['access_token']
+                return token
+    except Exception as e:
+        print(f"Warning: could not read Tesla token from HA config: {e}")
     return None
 
 
 def _get_tesla_config():
-    """Get Tesla energy site config. Token from config.yml or HA."""
+    """Get Tesla energy site config. Token from HA (auto-refreshed), fallback to config.yml."""
     cfg = get_config()
     tesla = cfg.get('billing', {}).get('tesla', {})
     site_id = tesla.get('site_id')
-    token = tesla.get('token')
+    # Always try HA first — it auto-refreshes the token
+    token = _get_tesla_token_from_ha()
     if not token:
-        token = _get_tesla_token_from_ha()
+        token = tesla.get('token')
     return site_id, token
 
 
