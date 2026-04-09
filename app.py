@@ -25,10 +25,17 @@ from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from config import (
-    EGAUGE_URL, EGAUGE_USER, EGAUGE_PASSWORD,
-    EXCLUDE_REGISTERS, get_tou_period, get_rate, is_summer,
-    WINTER_RATES, SUMMER_RATES,
-    is_solar_enabled, get_config,
+    EGAUGE_URL,
+    EGAUGE_USER,
+    EGAUGE_PASSWORD,
+    EXCLUDE_REGISTERS,
+    get_tou_period,
+    get_rate,
+    is_summer,
+    WINTER_RATES,
+    SUMMER_RATES,
+    is_solar_enabled,
+    get_config,
 )
 from solar_integration import HA_URL, HA_ENTITIES, get_ha_token
 from ev_integration import is_ev_enabled, fetch_ev_live, get_vehicles, get_ev_config
@@ -46,6 +53,7 @@ if STATIC_DIR.exists():
 # ==========================================
 # Cache
 # ==========================================
+
 
 class DataCache:
     """Simple in-memory cache with TTL."""
@@ -70,6 +78,7 @@ cache = DataCache()
 # ==========================================
 # eGauge Data Fetching (async)
 # ==========================================
+
 
 async def fetch_egauge_instant():
     """Fetch instantaneous power data from eGauge."""
@@ -191,7 +200,9 @@ async def fetch_egauge_today(target_date=None):
     if is_today:
         target_date_str = str(now.date())
         hours_today = now.hour + 1
-        n_rows = hours_today + 2  # eGauge returns n-1 data rows; need hours+1 for diffing
+        n_rows = (
+            hours_today + 2
+        )  # eGauge returns n-1 data rows; need hours+1 for diffing
         hourly_url = f"{EGAUGE_URL}/cgi-bin/egauge-show?c&h&n={n_rows}"
         # Also fetch current cumulative reading for partial hour
         # Use minute resolution (&m) to get the latest reading; default interval is daily
@@ -201,7 +212,7 @@ async def fetch_egauge_today(target_date=None):
         target_date_str = target_date
         # Historical date: request enough rows to cover today + target date
         # eGauge always returns most recent N hourly readings (no random-access by timestamp)
-        target_dt = datetime.strptime(target_date_str, '%Y-%m-%d')
+        target_dt = datetime.strptime(target_date_str, "%Y-%m-%d")
         days_ago = (now.date() - target_dt.date()).days
         # Need 24 hours per day + today's hours + 2 buffer (eGauge n-1 quirk)
         n_rows = (days_ago + 1) * 24 + now.hour + 3
@@ -213,11 +224,17 @@ async def fetch_egauge_today(target_date=None):
             try:
                 if current_url:
                     hourly_resp, current_resp = await asyncio.gather(
-                        client.get(hourly_url, auth=(EGAUGE_USER, EGAUGE_PASSWORD), timeout=15),
-                        client.get(current_url, auth=(EGAUGE_USER, EGAUGE_PASSWORD), timeout=15),
+                        client.get(
+                            hourly_url, auth=(EGAUGE_USER, EGAUGE_PASSWORD), timeout=15
+                        ),
+                        client.get(
+                            current_url, auth=(EGAUGE_USER, EGAUGE_PASSWORD), timeout=15
+                        ),
                     )
                 else:
-                    hourly_resp = await client.get(hourly_url, auth=(EGAUGE_USER, EGAUGE_PASSWORD), timeout=15)
+                    hourly_resp = await client.get(
+                        hourly_url, auth=(EGAUGE_USER, EGAUGE_PASSWORD), timeout=15
+                    )
                     current_resp = None
                 hourly_resp.raise_for_status()
                 break
@@ -234,7 +251,12 @@ async def fetch_egauge_today(target_date=None):
         for row in reader:
             ts = int(row["Date & Time"])
             dt = datetime.fromtimestamp(ts)
-            parsed = {"datetime": dt, "hour": dt.hour, "date": str(dt.date()), "tou_period": get_tou_period(dt.hour)}
+            parsed = {
+                "datetime": dt,
+                "hour": dt.hour,
+                "date": str(dt.date()),
+                "tou_period": get_tou_period(dt.hour),
+            }
             for key, val in row.items():
                 if key != "Date & Time":
                     try:
@@ -292,7 +314,9 @@ async def fetch_egauge_today(target_date=None):
     for h in day_hours:
         hour_circuits = [
             {"name": name, "kwh": round(data["kwh"], 3), "cost": round(data["cost"], 3)}
-            for name, data in sorted(h["circuits"].items(), key=lambda x: x[1]["cost"], reverse=True)
+            for name, data in sorted(
+                h["circuits"].items(), key=lambda x: x[1]["cost"], reverse=True
+            )
             if data["kwh"] > 0.001
         ]
         entry = {
@@ -319,7 +343,9 @@ async def fetch_egauge_today(target_date=None):
         "hourly": hourly_costs,
         "circuits": [
             {"name": name, "kwh": round(d["kwh"], 2), "cost": round(d["cost"], 2)}
-            for name, d in sorted(circuit_totals.items(), key=lambda x: x[1]["cost"], reverse=True)
+            for name, d in sorted(
+                circuit_totals.items(), key=lambda x: x[1]["cost"], reverse=True
+            )
         ],
     }
     cache.set(cache_key, result)
@@ -343,7 +369,13 @@ async def fetch_history(days=7):
 
 def _build_history(days):
     """Synchronous history builder using existing toolkit."""
-    from egauge_weekly_analysis import fetch_egauge_data, parse_csv_data, calculate_hourly_consumption, analyze_data, calculate_daily_totals
+    from egauge_weekly_analysis import (
+        fetch_egauge_data,
+        parse_csv_data,
+        calculate_hourly_consumption,
+        analyze_data,
+        calculate_daily_totals,
+    )
 
     try:
         csv_data = fetch_egauge_data(days)
@@ -357,34 +389,40 @@ def _build_history(days):
 
     # Convert to JSON-serializable format
     circuits = []
-    for reg_name, stats in sorted(register_stats.items(), key=lambda x: x[1]["total_cost"], reverse=True):
+    for reg_name, stats in sorted(
+        register_stats.items(), key=lambda x: x[1]["total_cost"], reverse=True
+    ):
         name = reg_name.replace(" [kWh]", "")
-        circuits.append({
-            "name": name,
-            "total_kwh": round(stats["total_kwh"], 2),
-            "total_cost": round(stats["total_cost"], 2),
-            "avg_daily_kwh": round(stats["avg_daily_kwh"], 2),
-            "avg_daily_cost": round(stats["avg_daily_cost"], 2),
-            "by_tou": {
-                period: {
-                    "kwh": round(d["kwh"], 2),
-                    "cost": round(d["cost"], 2),
-                    "percent": round(d["percent"], 1),
-                }
-                for period, d in stats["by_tou"].items()
-            },
-        })
+        circuits.append(
+            {
+                "name": name,
+                "total_kwh": round(stats["total_kwh"], 2),
+                "total_cost": round(stats["total_cost"], 2),
+                "avg_daily_kwh": round(stats["avg_daily_kwh"], 2),
+                "avg_daily_cost": round(stats["avg_daily_cost"], 2),
+                "by_tou": {
+                    period: {
+                        "kwh": round(d["kwh"], 2),
+                        "cost": round(d["cost"], 2),
+                        "percent": round(d["percent"], 1),
+                    }
+                    for period, d in stats["by_tou"].items()
+                },
+            }
+        )
 
     daily = []
     for d in daily_totals:
-        daily.append({
-            "date": d["date"],
-            "total_kwh": round(d["total_kwh"], 2),
-            "total_cost": round(d["total_cost"], 2),
-            "peak_cost": round(d["peak_cost"], 2),
-            "off_peak_cost": round(d["off_peak_cost"], 2),
-            "part_peak_cost": round(d["part_peak_cost"], 2),
-        })
+        daily.append(
+            {
+                "date": d["date"],
+                "total_kwh": round(d["total_kwh"], 2),
+                "total_cost": round(d["total_cost"], 2),
+                "peak_cost": round(d["peak_cost"], 2),
+                "off_peak_cost": round(d["off_peak_cost"], 2),
+                "part_peak_cost": round(d["part_peak_cost"], 2),
+            }
+        )
 
     # Generate optimization opportunities
     opportunities = []
@@ -393,28 +431,34 @@ def _build_history(days):
         peak_cost = c["by_tou"].get("peak", {}).get("cost", 0)
         if peak_pct > 20 and peak_cost > 1.0:
             # Estimate savings if shifted to off-peak using actual config rates
-            peak_rate = get_rate(datetime.now(), 'peak')
-            off_peak_rate = get_rate(datetime.now(), 'off_peak')
+            peak_rate = get_rate(datetime.now(), "peak")
+            off_peak_rate = get_rate(datetime.now(), "off_peak")
             potential_savings = peak_cost * (1 - off_peak_rate / peak_rate)
-            opportunities.append({
-                "circuit": c["name"],
-                "peak_pct": round(peak_pct, 1),
-                "peak_cost": round(peak_cost, 2),
-                "potential_savings": round(potential_savings, 2),
-                "total_cost": c["total_cost"],
-                "avg_daily_cost": c["avg_daily_cost"],
-            })
+            opportunities.append(
+                {
+                    "circuit": c["name"],
+                    "peak_pct": round(peak_pct, 1),
+                    "peak_cost": round(peak_cost, 2),
+                    "potential_savings": round(potential_savings, 2),
+                    "total_cost": c["total_cost"],
+                    "avg_daily_cost": c["avg_daily_cost"],
+                }
+            )
     opportunities.sort(key=lambda x: x["potential_savings"], reverse=True)
 
     # Per-hour consumption totals for source chart battery inference
     hourly_detail = []
     for h in hourly_data:
-        total_h = sum(v for k, v in h.items() if isinstance(k, str) and k.endswith("[kWh]"))
-        hourly_detail.append({
-            "date": str(h["date"]),
-            "hour": h["hour"],
-            "kwh": round(total_h, 3),
-        })
+        total_h = sum(
+            v for k, v in h.items() if isinstance(k, str) and k.endswith("[kWh]")
+        )
+        hourly_detail.append(
+            {
+                "date": str(h["date"]),
+                "hour": h["hour"],
+                "kwh": round(total_h, 3),
+            }
+        )
 
     return {
         "days": days,
@@ -446,7 +490,11 @@ async def fetch_solar(days=7):
 
 def _build_solar(days):
     """Synchronous solar builder."""
-    from egauge_weekly_analysis import fetch_egauge_data, parse_csv_data, calculate_hourly_consumption
+    from egauge_weekly_analysis import (
+        fetch_egauge_data,
+        parse_csv_data,
+        calculate_hourly_consumption,
+    )
     from solar_integration import build_hourly_solar_data, blend_egauge_with_solar
 
     try:
@@ -465,41 +513,47 @@ def _build_solar(days):
         return None
 
     circuits = []
-    for reg_name, stats in sorted(blended.items(), key=lambda x: x[1]["actual_cost"], reverse=True):
+    for reg_name, stats in sorted(
+        blended.items(), key=lambda x: x[1]["actual_cost"], reverse=True
+    ):
         name = reg_name.replace(" [kWh]", "")
-        circuits.append({
-            "name": name,
-            "total_kwh": round(stats["total_kwh"], 2),
-            "grid_kwh": round(stats["grid_kwh"], 2),
-            "solar_kwh": round(stats["solar_kwh"], 2),
-            "battery_kwh": round(stats["battery_kwh"], 2),
-            "grid_cost": round(stats["grid_cost"], 2),
-            "battery_cost": round(stats["battery_cost"], 2),
-            "actual_cost": round(stats["actual_cost"], 2),
-            "full_rate_cost": round(stats["full_rate_cost"], 2),
-            "solar_savings": round(stats["solar_savings"], 2),
-            "by_tou": {
-                period: {
-                    "kwh": round(tou_data["kwh"], 2),
-                    "grid_kwh": round(tou_data["grid_kwh"], 2),
-                }
-                for period, tou_data in stats["by_tou"].items()
-            },
-        })
+        circuits.append(
+            {
+                "name": name,
+                "total_kwh": round(stats["total_kwh"], 2),
+                "grid_kwh": round(stats["grid_kwh"], 2),
+                "solar_kwh": round(stats["solar_kwh"], 2),
+                "battery_kwh": round(stats["battery_kwh"], 2),
+                "grid_cost": round(stats["grid_cost"], 2),
+                "battery_cost": round(stats["battery_cost"], 2),
+                "actual_cost": round(stats["actual_cost"], 2),
+                "full_rate_cost": round(stats["full_rate_cost"], 2),
+                "solar_savings": round(stats["solar_savings"], 2),
+                "by_tou": {
+                    period: {
+                        "kwh": round(tou_data["kwh"], 2),
+                        "grid_kwh": round(tou_data["grid_kwh"], 2),
+                    }
+                    for period, tou_data in stats["by_tou"].items()
+                },
+            }
+        )
 
     # Hourly source breakdown for charts
     hourly_source = []
     for key in sorted(solar_data.keys()):
         date_str, hour = key
         h = solar_data[key]
-        hourly_source.append({
-            "date": date_str,
-            "hour": hour,
-            "solar_kwh": round(h.get("solar_kwh", 0), 3),
-            "grid_import_kwh": round(h.get("grid_import_kwh", 0), 3),
-            "battery_discharge_kwh": round(h.get("battery_discharge_kwh", 0), 3),
-            "battery_charge_kwh": round(h.get("battery_charge_kwh", 0), 3),
-        })
+        hourly_source.append(
+            {
+                "date": date_str,
+                "hour": hour,
+                "solar_kwh": round(h.get("solar_kwh", 0), 3),
+                "grid_import_kwh": round(h.get("grid_import_kwh", 0), 3),
+                "battery_discharge_kwh": round(h.get("battery_discharge_kwh", 0), 3),
+                "battery_charge_kwh": round(h.get("battery_charge_kwh", 0), 3),
+            }
+        )
 
     full_rate_cost = round(sum(c["full_rate_cost"] for c in circuits), 2)
     net_cost = round(system["net_cost"], 2)
@@ -538,8 +592,8 @@ def _build_solar(days):
     if system.get("battery_cost_per_kwh") is not None:
         # Compute value displaced: what battery discharge would cost at grid rates per TOU period
         battery_value_displaced = 0
-        for period in ['peak', 'part_peak', 'off_peak']:
-            discharge_kwh = system['by_tou'][period].get('battery_discharge', 0)
+        for period in ["peak", "part_peak", "off_peak"]:
+            discharge_kwh = system["by_tou"][period].get("battery_discharge", 0)
             period_rate = get_rate(datetime.now(), period)
             battery_value_displaced += discharge_kwh * period_rate
 
@@ -563,6 +617,7 @@ def _build_solar(days):
 # ==========================================
 # API Endpoints
 # ==========================================
+
 
 @app.get("/", response_class=HTMLResponse)
 async def dashboard():
@@ -683,7 +738,9 @@ async def api_ev_history(days: int = 7):
         "savings_vs_gas": round(gas_equivalent - total_cost, 2),
         "avg_efficiency": avg_efficiency,
         "by_tou": ev_circuit.get("by_tou", {}),
-        "off_peak_pct": round(ev_circuit.get("by_tou", {}).get("off_peak", {}).get("percent", 0), 1),
+        "off_peak_pct": round(
+            ev_circuit.get("by_tou", {}).get("off_peak", {}).get("percent", 0), 1
+        ),
     }
     cache.set(cache_key, data)
     return data
@@ -704,6 +761,7 @@ async def api_billing():
     tesla = None
     try:
         from tesla_energy import fetch_tesla_energy
+
         loop = asyncio.get_event_loop()
         tesla = await loop.run_in_executor(None, fetch_tesla_energy, days_so_far)
     except Exception as e:
@@ -712,7 +770,7 @@ async def api_billing():
     current = estimate_current_month(solar, tesla_data=tesla)
 
     billing_cfg = get_billing_config()
-    trueup_month = billing_cfg.get('trueup_month', 1)
+    trueup_month = billing_cfg.get("trueup_month", 1)
     now = datetime.now()
     if now.month >= trueup_month:
         since = f"{now.year}-{trueup_month:02d}"
@@ -720,31 +778,39 @@ async def api_billing():
         since = f"{now.year - 1}-{trueup_month:02d}"
 
     snapshots = get_monthly_billing(since_month=since)
-    current_nem = current.get('nem_charges_to_date', 0)
+    current_nem = current.get("nem_charges_to_date", 0)
     trueup = estimate_trueup(snapshots, current_month_nem=current_nem)
 
     # Gas data from PG&E/Opower via HA
     gas = None
     try:
         from solar_integration import HA_URL, get_ha_token
+
         ha_token = get_ha_token()
         if ha_token:
             gas_sensors = {
-                'cost_to_date': 'sensor.gas_account_4727821245_current_bill_gas_cost_to_date',
-                'forecasted_cost': 'sensor.gas_account_4727821245_current_bill_gas_forecasted_cost',
-                'usage_to_date': 'sensor.gas_account_4727821245_current_bill_gas_usage_to_date',
-                'forecasted_usage': 'sensor.gas_account_4727821245_current_bill_gas_forecasted_usage',
-                'typical_cost': 'sensor.gas_account_4727821245_typical_monthly_gas_cost',
+                "cost_to_date": "sensor.gas_account_4727821245_current_bill_gas_cost_to_date",
+                "forecasted_cost": "sensor.gas_account_4727821245_current_bill_gas_forecasted_cost",
+                "usage_to_date": "sensor.gas_account_4727821245_current_bill_gas_usage_to_date",
+                "forecasted_usage": "sensor.gas_account_4727821245_current_bill_gas_forecasted_usage",
+                "typical_cost": "sensor.gas_account_4727821245_typical_monthly_gas_cost",
             }
             import subprocess, json as _json
+
             gas = {}
             for key, entity in gas_sensors.items():
-                cmd = ['curl', '-sf', '--max-time', '5',
-                       '-H', f'Authorization: Bearer {ha_token}',
-                       f'{HA_URL}/api/states/{entity}']
+                cmd = [
+                    "curl",
+                    "-sf",
+                    "--max-time",
+                    "5",
+                    "-H",
+                    f"Authorization: Bearer {ha_token}",
+                    f"{HA_URL}/api/states/{entity}",
+                ]
                 r = subprocess.run(cmd, capture_output=True, text=True, timeout=8)
                 if r.returncode == 0:
-                    state = _json.loads(r.stdout).get('state', '0')
+                    state = _json.loads(r.stdout).get("state", "0")
                     try:
                         gas[key] = float(state)
                     except (ValueError, TypeError):
@@ -753,10 +819,10 @@ async def api_billing():
         print(f"Gas data fetch skipped: {e}")
 
     return {
-        'current_month': current,
-        'trueup': trueup,
-        'history': snapshots,
-        'gas': gas,
+        "current_month": current,
+        "trueup": trueup,
+        "history": snapshots,
+        "gas": gas,
     }
 
 
@@ -768,7 +834,7 @@ async def api_billing_snapshot():
     from data_store import store_monthly_billing
 
     now = datetime.now()
-    month_str = now.strftime('%Y-%m')
+    month_str = now.strftime("%Y-%m")
     days = now.day
 
     solar = await fetch_solar(days)
@@ -779,17 +845,17 @@ async def api_billing_snapshot():
 
     store_monthly_billing(
         month=month_str,
-        nem_charges=billing['nem_charges'],
-        generation_charges=billing['generation_charges'],
-        fixed_charges=billing['fixed_charges'],
-        grid_import_kwh=billing['grid_import_kwh'],
-        grid_export_kwh=billing['grid_export_kwh'],
-        net_kwh=billing['net_kwh'],
-        grid_cost=billing['delivery_cost_gross'],
-        export_credit=billing['export_credits'],
-        net_energy_cost=billing['nem_charges'],
-        base_charge=billing['fixed_charges'],
-        total_bill=billing['monthly_electric_bill'],
+        nem_charges=billing["nem_charges"],
+        generation_charges=billing["generation_charges"],
+        fixed_charges=billing["fixed_charges"],
+        grid_import_kwh=billing["grid_import_kwh"],
+        grid_export_kwh=billing["grid_export_kwh"],
+        net_kwh=billing["net_kwh"],
+        grid_cost=billing["delivery_cost_gross"],
+        export_credit=billing["export_credits"],
+        net_energy_cost=billing["nem_charges"],
+        base_charge=billing["fixed_charges"],
+        total_bill=billing["monthly_electric_bill"],
         days=days,
     )
 
@@ -800,6 +866,7 @@ async def api_billing_snapshot():
 async def api_billing_actual(month: str, amount: float, electric: float = None):
     """Record actual PG&E bill. Optionally separate electric from gas."""
     from data_store import update_actual_bill, update_actual_electric
+
     update_actual_bill(month, amount)
     if electric is not None:
         update_actual_electric(month, electric)
@@ -812,6 +879,7 @@ async def api_battery_cap():
     loop = asyncio.get_event_loop()
     try:
         from solar_forecast import recommend_charge_cap
+
         result = await loop.run_in_executor(None, recommend_charge_cap)
         return result
     except Exception as e:
@@ -827,13 +895,13 @@ async def api_prediction_log():
 
     loop = asyncio.get_event_loop()
     prediction = await loop.run_in_executor(None, recommend_charge_cap)
-    prediction['logged_at'] = datetime.now().isoformat()
+    prediction["logged_at"] = datetime.now().isoformat()
 
     # Append to audit log file
-    log_path = Path(__file__).parent / 'data' / 'prediction_audit.jsonl'
+    log_path = Path(__file__).parent / "data" / "prediction_audit.jsonl"
     log_path.parent.mkdir(exist_ok=True)
-    with open(log_path, 'a') as f:
-        f.write(json_mod.dumps(prediction) + '\n')
+    with open(log_path, "a") as f:
+        f.write(json_mod.dumps(prediction) + "\n")
 
     return {"status": "logged", "prediction": prediction}
 
@@ -844,7 +912,7 @@ async def api_prediction_history():
     import json as json_mod
     from pathlib import Path
 
-    log_path = Path(__file__).parent / 'data' / 'prediction_audit.jsonl'
+    log_path = Path(__file__).parent / "data" / "prediction_audit.jsonl"
     if not log_path.exists():
         return {"history": []}
 
@@ -861,13 +929,13 @@ async def api_prediction_history():
 
     # Get actual solar data from Tesla cache if available
     actual_solar = {}
-    tesla_cache = Path(__file__).parent / 'data' / 'tesla_energy_30d.json'
+    tesla_cache = Path(__file__).parent / "data" / "tesla_energy_30d.json"
     if tesla_cache.exists():
         try:
             with open(tesla_cache) as f:
                 tesla = json_mod.load(f)
-            for date, day_data in tesla.get('daily', {}).items():
-                actual_solar[date] = round(day_data.get('solar', 0), 1)
+            for date, day_data in tesla.get("daily", {}).items():
+                actual_solar[date] = round(day_data.get("solar", 0), 1)
         except Exception:
             pass
 
@@ -875,28 +943,65 @@ async def api_prediction_history():
     history = []
     seen_dates = set()
     for p in reversed(predictions):  # most recent first
-        sp = p.get('solar_prediction', {})
-        date = sp.get('date', '')
+        sp = p.get("solar_prediction", {})
+        date = sp.get("date", "")
         if date in seen_dates:
             continue  # one entry per date
         seen_dates.add(date)
 
         actual = actual_solar.get(date)
-        predicted = sp.get('predicted_solar_kwh', 0)
+        predicted = sp.get("predicted_solar_kwh", 0)
         error_pct = None
         if actual and predicted:
             error_pct = round((actual - predicted) / predicted * 100, 0)
 
-        history.append({
-            'date': date,
-            'predicted_solar': predicted,
-            'actual_solar': actual,
-            'error_pct': error_pct,
-            'cloud_cover': sp.get('cloud_cover_pct'),
-            'recommended_cap': p.get('recommended_cap'),
-        })
+        history.append(
+            {
+                "date": date,
+                "predicted_solar": predicted,
+                "actual_solar": actual,
+                "error_pct": error_pct,
+                "cloud_cover": sp.get("cloud_cover_pct"),
+                "recommended_cap": p.get("recommended_cap"),
+            }
+        )
 
     return {"history": history[:14]}  # Last 2 weeks
+
+
+@app.post("/api/battery/record-fill")
+async def api_record_fill(date: str, full_hour: float, actual_solar: float = None):
+    """Record when battery actually hit 100% for auto-tuning feedback."""
+    from solar_forecast import record_actual_fill
+
+    record_actual_fill(date, full_hour, actual_solar)
+    return {"status": "ok", "date": date, "full_hour": full_hour}
+
+
+@app.get("/api/battery/tuning")
+async def api_battery_tuning():
+    """Show auto-tuning state: history, current ratio, adjustments."""
+    from solar_forecast import _load_history, _auto_tune_ratio
+
+    history = _load_history()
+    ratio = _auto_tune_ratio()
+
+    # Summary stats
+    with_actuals = [h for h in history if h.get("actual_full_hour") is not None]
+    avg_fill = (
+        sum(h["actual_full_hour"] for h in with_actuals) / len(with_actuals)
+        if with_actuals
+        else None
+    )
+
+    return {
+        "current_ratio": ratio,
+        "target_fill_hour": 14.0,
+        "avg_actual_fill_hour": round(avg_fill, 1) if avg_fill else None,
+        "days_tracked": len(history),
+        "days_with_actuals": len(with_actuals),
+        "recent": history[-14:],
+    }
 
 
 # ==========================================
@@ -950,7 +1055,7 @@ async def build_live_payload():
     # Negative values mean loads/outflows (battery charging, grid exporting) — NOT sources
     solar_supply = max(0, payload["solar_w"])
     battery_supply = max(0, payload["battery_w"])  # positive = discharging to home
-    grid_supply = max(0, payload["grid_w"])         # positive = importing from grid
+    grid_supply = max(0, payload["grid_w"])  # positive = importing from grid
     total_supply = solar_supply + battery_supply + grid_supply
     if total_supply > 0:
         payload["source_mix"] = {
@@ -976,6 +1081,7 @@ async def build_live_payload():
         if not ev_cached:
             try:
                 from ev_integration import fetch_ev_live as _fetch_ev
+
                 ev_cached = _fetch_ev()
                 if ev_cached:
                     cache.set("ev_live", ev_cached)
@@ -1007,6 +1113,7 @@ async def websocket_live(ws: WebSocket):
 # Background: refresh today cache periodically
 # ==========================================
 
+
 async def background_today_refresh():
     """Refresh today's cost data every 60 seconds."""
     while True:
@@ -1026,6 +1133,7 @@ async def startup():
 # Weekly Email Scheduler
 # ==========================================
 
+
 def schedule_weekly_email():
     """Run weekly email report on Monday 6 AM PST."""
     from config import EMAIL_ENABLED
@@ -1041,14 +1149,19 @@ def schedule_weekly_email():
             days_until_monday = (7 - now.weekday()) % 7
             if days_until_monday == 0 and now.hour >= 6:
                 days_until_monday = 7
-            next_monday = now.replace(hour=6, minute=0, second=0, microsecond=0) + timedelta(days=days_until_monday)
+            next_monday = now.replace(
+                hour=6, minute=0, second=0, microsecond=0
+            ) + timedelta(days=days_until_monday)
             sleep_seconds = (next_monday - now).total_seconds()
-            print(f"Weekly email scheduled for {next_monday} ({sleep_seconds/3600:.1f}h from now)")
+            print(
+                f"Weekly email scheduled for {next_monday} ({sleep_seconds/3600:.1f}h from now)"
+            )
             time.sleep(sleep_seconds)
 
             # Run the report — only add --solar when enabled
             try:
                 import subprocess
+
                 script = str(Path(__file__).parent / "egauge_weekly_analysis.py")
                 cmd = ["python3", script, "--days", "7", "--email"]
                 if is_solar_enabled():
