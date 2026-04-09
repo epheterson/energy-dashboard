@@ -10,7 +10,6 @@ import json
 import subprocess
 from datetime import datetime, timedelta
 
-
 # NWS gridpoint for Danville, CA (37.8216, -121.9999)
 NWS_GRIDPOINT_URL = "https://api.weather.gov/gridpoints/MTR/100,104"
 
@@ -18,15 +17,15 @@ NWS_GRIDPOINT_URL = "https://api.weather.gov/gridpoints/MTR/100,104"
 # These represent clear-sky potential for a 9.86 kW system in Danville
 # Will be refined as more data accumulates
 MONTHLY_PEAK_SOLAR = {
-    1: 18.7,   # January
-    2: 23.8,   # February
-    3: 31.4,   # March
-    4: 35.0,   # April (estimated)
-    5: 38.0,   # May (estimated)
-    6: 40.0,   # June (estimated — near solstice peak)
-    7: 39.0,   # July (estimated)
-    8: 36.0,   # August (estimated)
-    9: 32.0,   # September (estimated)
+    1: 18.7,  # January
+    2: 23.8,  # February
+    3: 31.4,  # March
+    4: 35.0,  # April (estimated)
+    5: 38.0,  # May (estimated)
+    6: 40.0,  # June (estimated — near solstice peak)
+    7: 39.0,  # July (estimated)
+    8: 36.0,  # August (estimated)
+    9: 32.0,  # September (estimated)
     10: 26.0,  # October (estimated)
     11: 20.0,  # November (estimated)
     12: 16.0,  # December (estimated)
@@ -44,8 +43,11 @@ def fetch_tomorrow_cloud_cover():
     """
     try:
         cmd = [
-            'curl', '-s', '-A', 'EnergyDashboard/1.0 (epheterson@gmail.com)',
-            NWS_GRIDPOINT_URL
+            "curl",
+            "-s",
+            "-A",
+            "EnergyDashboard/1.0 (epheterson@gmail.com)",
+            NWS_GRIDPOINT_URL,
         ]
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
         data = json.loads(result.stdout)
@@ -53,7 +55,7 @@ def fetch_tomorrow_cloud_cover():
         print(f"Warning: NWS forecast fetch failed: {e}")
         return None
 
-    sky_cover = data.get('properties', {}).get('skyCover', {}).get('values', [])
+    sky_cover = data.get("properties", {}).get("skyCover", {}).get("values", [])
     if not sky_cover:
         return None
 
@@ -63,20 +65,21 @@ def fetch_tomorrow_cloud_cover():
     # Filter to daylight hours (8am-5pm) tomorrow
     daytime_covers = []
     for entry in sky_cover:
-        valid_time = entry.get('validTime', '')
+        valid_time = entry.get("validTime", "")
         try:
             # NWS uses ISO 8601 duration format: "2026-03-31T08:00:00+00:00/PT1H"
-            dt_str = valid_time.split('/')[0]
-            dt = datetime.fromisoformat(dt_str.replace('Z', '+00:00'))
+            dt_str = valid_time.split("/")[0]
+            dt = datetime.fromisoformat(dt_str.replace("Z", "+00:00"))
             # Convert to Pacific time (handles PST/PDT automatically)
             try:
                 from zoneinfo import ZoneInfo
+
                 local_dt = dt.astimezone(ZoneInfo("America/Los_Angeles"))
             except ImportError:
                 local_dt = dt - timedelta(hours=7)  # Fallback: PDT
 
             if local_dt.date() == tomorrow and 8 <= local_dt.hour <= 17:
-                daytime_covers.append(entry.get('value', 50))
+                daytime_covers.append(entry.get("value", 50))
         except (ValueError, TypeError):
             continue
 
@@ -115,12 +118,12 @@ def predict_solar_production(cloud_cover_pct=None):
         forecast_available = False
 
     return {
-        'date': tomorrow.strftime('%Y-%m-%d'),
-        'month': month,
-        'peak_solar_kwh': round(peak_solar, 1),
-        'cloud_cover_pct': round(cloud_cover_pct, 0),
-        'predicted_solar_kwh': round(predicted_kwh, 1),
-        'forecast_available': forecast_available,
+        "date": tomorrow.strftime("%Y-%m-%d"),
+        "month": month,
+        "peak_solar_kwh": round(peak_solar, 1),
+        "cloud_cover_pct": round(cloud_cover_pct, 0),
+        "predicted_solar_kwh": round(predicted_kwh, 1),
+        "forecast_available": forecast_available,
     }
 
 
@@ -131,12 +134,13 @@ def recommend_charge_cap():
     """
     prediction = predict_solar_production()
 
-    predicted_kwh = prediction['predicted_solar_kwh']
+    predicted_kwh = prediction["predicted_solar_kwh"]
 
-    # Goal: set cap so solar fills battery to ~98-100% by afternoon
-    # Home consumes ~65-70% of solar directly; ~30-35% goes to battery
-    # Calibrated from April 1: 34 kWh solar, 11 kWh to battery = 32%
-    solar_to_battery_kwh = predicted_kwh * 0.33
+    # Goal: set cap so solar fills battery to ~98-100% by 2-3pm (before peak)
+    # Calibrated from April 2-8 data: battery hits 100% by 11am with 0.33 ratio,
+    # wasting 12 kWh/day in grid export. Actual solar-to-battery is ~50% of production.
+    # Using 0.50 so battery fills closer to 2pm, not 11am.
+    solar_to_battery_kwh = predicted_kwh * 0.50
     solar_fill_pct = solar_to_battery_kwh / BATTERY_CAPACITY_KWH * 100
 
     # Cap = 100% minus solar fill (so grid + solar = ~100%)
@@ -150,12 +154,12 @@ def recommend_charge_cap():
     savings_per_night = solar_to_battery_kwh * 0.28  # Off-peak delivery rate
 
     return {
-        'recommended_cap': recommended_cap,
-        'solar_prediction': prediction,
-        'solar_to_battery_kwh': round(solar_to_battery_kwh, 1),
-        'solar_fill_pct': round(solar_fill_pct, 0),
-        'estimated_savings_vs_full': round(savings_per_night, 2),
-        'reasoning': (
+        "recommended_cap": recommended_cap,
+        "solar_prediction": prediction,
+        "solar_to_battery_kwh": round(solar_to_battery_kwh, 1),
+        "solar_fill_pct": round(solar_fill_pct, 0),
+        "estimated_savings_vs_full": round(savings_per_night, 2),
+        "reasoning": (
             f"Tomorrow: {prediction['cloud_cover_pct']:.0f}% cloud cover, "
             f"~{predicted_kwh:.0f} kWh solar expected. "
             f"~{solar_to_battery_kwh:.0f} kWh can go to battery ({solar_fill_pct:.0f}% of {BATTERY_CAPACITY_KWH} kWh). "
