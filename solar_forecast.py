@@ -150,12 +150,35 @@ def _save_history(history):
     history_file.write_text(json.dumps(history, indent=2))
 
 
+def _get_yesterday_fill_hour():
+    """Check Tesla SOC data for when battery hit 100% yesterday.
+
+    Reads from the Tesla cache (already fetched by billing endpoint).
+    Returns the hour (float) or None if battery never hit 100%.
+    """
+    yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+    cache_file = CACHE_DIR / "tesla_energy_30d.json"
+    if not cache_file.exists():
+        return None
+
+    try:
+        data = json.loads(cache_file.read_text())
+        # Tesla cache has daily data but not SOC — need the SOC endpoint
+        # For now, check if we already recorded it
+        history = _load_history()
+        for h in reversed(history):
+            if h.get("date") == yesterday and h.get("actual_full_hour") is not None:
+                return h["actual_full_hour"]
+    except Exception:
+        pass
+    return None
+
+
 def _auto_tune_ratio():
     """Auto-tune the solar-to-battery ratio from historical data.
 
-    Looks at recent days where we have both prediction and actual data.
-    If battery consistently fills too early (before 1pm), ratio is too low.
-    If battery doesn't reach 100%, ratio is too high.
+    Looks at recent days where we have both prediction and actual fill data.
+    Only considers SUNNY days (cloud < 50%) — cloudy days aren't useful for tuning.
     Target: battery hits 100% between 1pm and 3pm.
 
     Returns the tuned ratio, or the default if not enough data.
@@ -164,32 +187,29 @@ def _auto_tune_ratio():
     if len(history) < 3:
         return 0.50  # Default until we have enough data
 
-    # Look at last 14 days with complete data
-    recent = [h for h in history[-14:] if h.get("actual_full_hour") is not None]
+    # Only tune on sunny days — cloudy days have unpredictable solar
+    recent = [
+        h
+        for h in history[-14:]
+        if h.get("actual_full_hour") is not None and h.get("cloud_cover", 100) < 50
+    ]
     if len(recent) < 3:
         return 0.50
 
-    # Calculate average fill hour and adjust ratio
+    # Calculate average fill hour on sunny days and adjust ratio
     avg_full_hour = sum(h["actual_full_hour"] for h in recent) / len(recent)
     current_ratio = recent[-1].get("ratio_used", 0.50)
 
     # Target: fill at hour 14 (2pm)
-    # If filling too early (< 13), increase ratio (lower cap, more room for solar)
-    # If filling too late (> 15) or not at all, decrease ratio (higher cap)
     if avg_full_hour < 12.5:
-        # Way too early — big adjustment
         new_ratio = min(0.70, current_ratio + 0.05)
     elif avg_full_hour < 13.5:
-        # Slightly too early — small adjustment
         new_ratio = min(0.70, current_ratio + 0.02)
     elif avg_full_hour > 15.5:
-        # Too late — lower ratio
         new_ratio = max(0.30, current_ratio - 0.03)
     elif avg_full_hour > 14.5:
-        # Slightly late
         new_ratio = max(0.30, current_ratio - 0.01)
     else:
-        # 13.5-14.5 = perfect range, no change
         new_ratio = current_ratio
 
     return round(new_ratio, 3)
