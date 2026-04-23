@@ -875,12 +875,42 @@ async def api_billing_actual(month: str, amount: float, electric: float = None):
 
 @app.get("/api/battery/recommended-cap")
 async def api_battery_cap():
-    """Predict tomorrow's solar and recommend grid charge cap."""
+    """Predict tomorrow's solar and recommend grid charge cap.
+    Auto-logs the prediction to the audit trail for history tracking.
+    """
     loop = asyncio.get_event_loop()
     try:
         from solar_forecast import recommend_charge_cap
+        from datetime import datetime
+        import json as json_mod
 
         result = await loop.run_in_executor(None, recommend_charge_cap)
+
+        # Auto-log prediction for history (one per day)
+        log_path = Path(__file__).parent / "data" / "prediction_audit.jsonl"
+        log_path.parent.mkdir(exist_ok=True)
+        today_date = result.get("solar_prediction", {}).get("date", "")
+
+        # Check if we already logged today
+        already_logged = False
+        if log_path.exists():
+            with open(log_path) as f:
+                for line in f:
+                    if today_date and today_date in line:
+                        already_logged = True
+                        break
+
+        if not already_logged and today_date:
+            entry = dict(result)
+            entry["logged_at"] = datetime.now().isoformat()
+            with open(log_path, "a") as f:
+                f.write(json_mod.dumps(entry) + "\n")
+            log.info(
+                "Battery cap prediction logged for %s: %s%%",
+                today_date,
+                result.get("recommended_cap"),
+            )
+
         return result
     except Exception as e:
         return {"error": str(e)}
