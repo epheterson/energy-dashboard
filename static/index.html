@@ -718,6 +718,7 @@ tr:last-child td { border-bottom: none; }
 .billing-row {
   display: grid;
   grid-template-columns: 1fr 1fr;
+  align-items: start;
   gap: 16px;
   margin-bottom: 24px;
 }
@@ -726,41 +727,41 @@ tr:last-child td { border-bottom: none; }
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 12px;
-  padding: 20px;
+  padding: 14px 16px;
 }
 
 .billing-card .billing-title {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 1px;
-  margin-bottom: 16px;
+  margin-bottom: 6px;
 }
 
 .billing-card .billing-hero {
-  font-size: 36px;
+  font-size: 26px;
   font-weight: 700;
-  letter-spacing: -1px;
-  margin-bottom: 4px;
+  letter-spacing: -0.5px;
+  margin-bottom: 2px;
 }
 
 .billing-card .billing-hero-sub {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--text-muted);
-  margin-bottom: 16px;
+  margin-bottom: 10px;
 }
 
 .billing-breakdown {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 4px;
 }
 
 .billing-line {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  font-size: 13px;
+  font-size: 12px;
 }
 
 .billing-line .billing-line-label {
@@ -772,7 +773,7 @@ tr:last-child td { border-bottom: none; }
 }
 
 .billing-line.deferred {
-  padding-top: 8px;
+  padding-top: 4px;
   border-top: 1px solid var(--border);
 }
 
@@ -785,15 +786,15 @@ tr:last-child td { border-bottom: none; }
 .billing-divider {
   height: 1px;
   background: var(--border);
-  margin: 12px 0;
+  margin: 6px 0;
 }
 
 .trueup-progress {
   width: 100%;
-  height: 6px;
+  height: 5px;
   background: var(--surface-2);
   border-radius: 3px;
-  margin: 12px 0 8px;
+  margin: 8px 0 6px;
   overflow: hidden;
 }
 
@@ -1221,7 +1222,7 @@ setInterval(refreshGlance, 60000);
       <span id="trueupMonthsElapsed">-- months</span>
       <span>12 months</span>
     </div>
-    <div class="billing-breakdown" style="margin-top:16px">
+    <div class="billing-breakdown" style="margin-top:10px">
       <div class="billing-line">
         <span class="billing-line-label">Monthly Avg NEM</span>
         <span class="billing-line-value" id="trueupMonthlyAvg">--</span>
