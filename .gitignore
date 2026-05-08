@@ -11,3 +11,6 @@ __pycache__/
 
 # Local bill data (PDFs, seed scripts with personal financials)
 bills/
+
+# Claude Code per-repo settings (environment-specific)
+.claude/
