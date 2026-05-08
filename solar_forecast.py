@@ -215,66 +215,195 @@ def _auto_tune_ratio():
     return round(new_ratio, 3)
 
 
-def recommend_charge_cap():
-    """Calculate recommended grid charge cap percentage.
+def predict_loads(lookback_days=14, sunrise_hour=6, sunset_hour=19):
+    """Predict tomorrow's daytime + overnight load from rolling history.
 
-    Uses auto-tuned ratio based on historical fill times.
-    Logs every decision for future tuning.
+    Daytime = hours [sunrise_hour, sunset_hour) — when solar is producing
+    Overnight = hours [sunset_hour, 24) + [0, sunrise_hour) — battery covers
 
-    Returns dict with recommendation and reasoning.
+    Returns dict with predicted daytime_kwh + overnight_kwh in kWh.
+    Uses 14-day rolling average per hour-of-day, then sums into the buckets.
     """
+    import sqlite3, json
+    from pathlib import Path
+    from datetime import datetime, timedelta
+
+    db = Path(__file__).parent / "data" / "egauge_history.db"
+    if not db.exists():
+        # Fallback: use config-defined defaults
+        return {
+            "daytime_kwh": 25.0,
+            "overnight_kwh": 15.0,
+            "source": "fallback_defaults",
+        }
+
+    cutoff_ts = int((datetime.now() - timedelta(days=lookback_days)).timestamp())
+
+    conn = sqlite3.connect(str(db))
+    rows = conn.execute(
+        "SELECT hour, register_data FROM hourly_consumption WHERE timestamp >= ?",
+        (cutoff_ts,),
+    ).fetchall()
+    conn.close()
+
+    if not rows:
+        return {"daytime_kwh": 25.0, "overnight_kwh": 15.0, "source": "no_history"}
+
+    # Sum consumption per hour-of-day across all collected rows
+    # eGauge "Usage [kWh]" is total; per-circuit values may be negative for
+    # generation registers. We want net consumption = positive values only.
+    by_hour = {h: [] for h in range(24)}
+    for hour, register_json in rows:
+        try:
+            registers = json.loads(register_json)
+        except Exception:
+            continue
+        # "Usage [kWh]" is the cleanest total if present
+        total = registers.get("Usage [kWh]")
+        if total is None:
+            # Fallback: sum positive consumption registers (skip Generation/Total Power which can be negative)
+            total = sum(
+                v
+                for k, v in registers.items()
+                if isinstance(v, (int, float))
+                and v > 0
+                and "Generation" not in k
+                and "Total Power" not in k
+            )
+        if total is not None:
+            by_hour[hour].append(total)
+
+    # Average per hour-of-day
+    avg_by_hour = {
+        h: (sum(vals) / len(vals)) if vals else 0.0 for h, vals in by_hour.items()
+    }
+
+    daytime_kwh = sum(avg_by_hour[h] for h in range(sunrise_hour, sunset_hour))
+    overnight_kwh = sum(
+        avg_by_hour[h]
+        for h in list(range(sunset_hour, 24)) + list(range(0, sunrise_hour))
+    )
+
+    return {
+        "daytime_kwh": round(daytime_kwh, 1),
+        "overnight_kwh": round(overnight_kwh, 1),
+        "source": f"{lookback_days}d_avg",
+        "lookback_days": lookback_days,
+        "samples_per_hour": {h: len(by_hour[h]) for h in range(24)},
+    }
+
+
+
+def recommend_charge_cap():
+    """Calculate recommended grid charge cap to maximize self-sufficiency.
+
+    Goal: battery hits ~99% at sunset (NOT 100% — leaves headroom for solar
+    all day). Minimize export. Minimize overnight grid import.
+
+    Math:
+      solar_excess = max(0, predicted_solar - predicted_daytime_load)
+      battery_in_from_solar = solar_excess * efficiency
+      target_cap = 0.99 - battery_in_from_solar / capacity
+      floor_cap = (predicted_overnight_load / efficiency) / capacity + safety_margin
+      recommended_cap = clamp(max(target_cap, floor_cap), 0.05, 1.0)
+
+    Returns dict with recommendation + reasoning + ALL inputs for transparency.
+    """
+    from datetime import datetime
+    from config import get_config
+
+    cfg = get_config()
+    efficiency = cfg.get("solar", {}).get("battery_efficiency", 0.90)
+    safety_margin = 0.05  # 5% buffer above predicted overnight load
+
     prediction = predict_solar_production()
+    predicted_solar = prediction["predicted_solar_kwh"]
+    loads = predict_loads()
+    daytime_load = loads["daytime_kwh"]
+    overnight_load = loads["overnight_kwh"]
 
-    predicted_kwh = prediction["predicted_solar_kwh"]
+    # How much solar is left over after covering daytime load? That goes to battery.
+    solar_excess = max(0, predicted_solar - daytime_load)
+    battery_in = solar_excess * efficiency
+    fill_pct_from_solar = battery_in / BATTERY_CAPACITY_KWH
 
-    # Auto-tune ratio from historical data
-    ratio = _auto_tune_ratio()
-    solar_to_battery_kwh = predicted_kwh * ratio
-    solar_fill_pct = solar_to_battery_kwh / BATTERY_CAPACITY_KWH * 100
+    # Target cap: battery hits 0.99 at sunset
+    target_cap_pct = 0.99 - fill_pct_from_solar
 
-    # Cap = 100% minus solar fill (so grid + solar = ~100%)
-    # Minimum 40% (sunniest day still needs baseline)
-    # Maximum 90% (cloudy days need more grid)
-    recommended_cap = max(40, min(90, int(100 - solar_fill_pct)))
+    # Floor cap: battery must have enough for overnight + safety
+    min_cap_pct = (overnight_load / efficiency) / BATTERY_CAPACITY_KWH + safety_margin
 
-    # Calculate economics
-    # Grid off-peak: ~$0.28/kWh. Solar: $0.00
-    # Savings from leaving headroom for solar
-    savings_per_night = solar_to_battery_kwh * 0.28  # Off-peak delivery rate
+    chosen_cap_pct = max(min_cap_pct, target_cap_pct)
+    chosen_cap_pct = min(1.0, max(0.05, chosen_cap_pct))
+    recommended_cap = int(chosen_cap_pct * 100)
+
+    # Predicted outcome
+    predicted_export_kwh = max(
+        0, solar_excess - (BATTERY_CAPACITY_KWH * (1 - chosen_cap_pct)) / efficiency
+    )
+    predicted_overnight_grid_import_kwh = max(
+        0, overnight_load - chosen_cap_pct * BATTERY_CAPACITY_KWH * efficiency
+    )
+
+    # Decision reasoning
+    if min_cap_pct > target_cap_pct:
+        reason_summary = "FLOOR (overnight load drives cap)"
+    else:
+        reason_summary = "TARGET (solar excess fills battery to 99% by sunset)"
 
     result = {
         "recommended_cap": recommended_cap,
         "solar_prediction": prediction,
-        "solar_to_battery_kwh": round(solar_to_battery_kwh, 1),
-        "solar_fill_pct": round(solar_fill_pct, 0),
-        "estimated_savings_vs_full": round(savings_per_night, 2),
-        "ratio_used": ratio,
+        "predicted_daytime_load_kwh": daytime_load,
+        "predicted_overnight_load_kwh": overnight_load,
+        "solar_excess_kwh": round(solar_excess, 1),
+        "battery_in_from_solar_kwh": round(battery_in, 1),
+        "predicted_export_kwh": round(predicted_export_kwh, 1),
+        "predicted_overnight_grid_import_kwh": round(
+            predicted_overnight_grid_import_kwh, 1
+        ),
+        "target_cap_pct": round(target_cap_pct * 100, 1),
+        "floor_cap_pct": round(min_cap_pct * 100, 1),
+        "reasoning_mode": reason_summary,
+        "battery_efficiency": efficiency,
+        "battery_capacity_kwh": BATTERY_CAPACITY_KWH,
         "reasoning": (
-            f"Tomorrow: {prediction['cloud_cover_pct']:.0f}% cloud cover, "
-            f"~{predicted_kwh:.0f} kWh solar expected. "
-            f"~{solar_to_battery_kwh:.0f} kWh can go to battery ({solar_fill_pct:.0f}% of {BATTERY_CAPACITY_KWH} kWh). "
-            f"Grid charge to {recommended_cap}%, let solar fill the rest. "
-            f"(ratio={ratio:.3f})"
+            f"Tomorrow: {prediction['cloud_cover_pct']:.0f}% cloud, "
+            f"~{predicted_solar:.0f} kWh solar predicted. "
+            f"Daytime load ~{daytime_load:.0f} kWh, overnight load ~{overnight_load:.0f} kWh. "
+            f"Solar excess ~{solar_excess:.0f} kWh → ~{battery_in:.0f} kWh into battery (after {efficiency*100:.0f}% rt). "
+            f"Cap target: {target_cap_pct*100:.0f}% (hit 99% at sunset). "
+            f"Cap floor: {min_cap_pct*100:.0f}% (overnight need). "
+            f"Recommend: {recommended_cap}% [{reason_summary}]. "
+            f"Predicted export: {predicted_export_kwh:.1f} kWh. "
+            f"Predicted overnight grid import: {predicted_overnight_grid_import_kwh:.1f} kWh."
         ),
     }
 
-    # Log decision for auto-tuning
+    # Log decision for auto-tuning + audit
     history = _load_history()
     history.append(
         {
             "date": prediction.get("date"),
-            "predicted_solar": predicted_kwh,
+            "predicted_solar": predicted_solar,
+            "predicted_daytime_load": daytime_load,
+            "predicted_overnight_load": overnight_load,
             "cloud_cover": prediction.get("cloud_cover_pct"),
             "recommended_cap": recommended_cap,
-            "ratio_used": ratio,
-            "actual_full_hour": None,  # Filled in later by record_actual_fill
+            "target_cap_pct": round(target_cap_pct * 100, 1),
+            "floor_cap_pct": round(min_cap_pct * 100, 1),
+            "reasoning_mode": reason_summary,
+            "actual_full_hour": None,
             "actual_solar": None,
+            "actual_export_kwh": None,  # NEW — to be filled by backfill
+            "actual_grid_import_kwh": None,  # NEW
             "logged_at": datetime.now().isoformat(),
         }
     )
     _save_history(history)
 
     return result
+
 
 
 def record_actual_fill(date, full_hour, actual_solar_kwh=None):
