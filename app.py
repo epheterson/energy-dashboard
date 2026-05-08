@@ -310,10 +310,10 @@ async def fetch_egauge_today(target_date=None):
     # essentially free; only grid imports cost retail rates). Pull hourly grid
     # vs battery breakdown from /api/solar's data layer if solar is enabled.
     grid_share_by_hour = {}  # {hour_int: 0.0..1.0 (grid fraction of consumption)}
+    battery_kwh_by_hour = {}  # {hour_int: kWh discharged from battery}
     try:
         from solar_integration import is_solar_enabled, build_hourly_solar_data
         if is_solar_enabled():
-            # Pull enough history to include target date (default 7d)
             from datetime import date as _date_cls, datetime as _dt
             try:
                 target_d = _dt.strptime(target_date_str, "%Y-%m-%d").date()
@@ -321,7 +321,6 @@ async def fetch_egauge_today(target_date=None):
             except Exception:
                 age_days = 7
             solar_data = build_hourly_solar_data(days=min(30, age_days))
-            # build_hourly_solar_data returns dict keyed by (date, hour) tuple
             if isinstance(solar_data, dict):
                 for (date_str, hour_int), h in solar_data.items():
                     if date_str != target_date_str:
@@ -331,18 +330,32 @@ async def fetch_egauge_today(target_date=None):
                     solar_kwh = h.get("solar_kwh", 0) or 0
                     total = max(0.001, grid_kwh + batt_disc + solar_kwh)
                     grid_share_by_hour[hour_int] = max(0.0, min(1.0, grid_kwh / total))
+                    battery_kwh_by_hour[hour_int] = batt_disc
     except Exception as _e:
-        # If solar not configured or fetch fails, fall back to charging full rate (legacy behavior)
         pass
 
-    # Apply discount: cost = circuit_kwh × rate × grid_share_for_this_hour.
-    # If no solar data (grid_share unknown), default 1.0 (charge full rate — original behavior).
+    # Apply discount + emit battery contribution per hour:
+    # cost = circuit_kwh × rate × grid_share_for_this_hour (grid-only)
+    # battery_avoided_cost = battery_kwh × tou_rate (what would have been paid at retail)
+    # get_rate already imported at module level
+    from datetime import datetime as _dt2
+    try:
+        target_d_obj = _dt2.strptime(target_date_str, "%Y-%m-%d").date()
+    except Exception:
+        target_d_obj = datetime.now().date()
     for h in day_hours:
         gs = grid_share_by_hour.get(h.get("hour"), 1.0)
         if gs < 1.0:
             for circ in h["circuits"].values():
                 circ["cost"] = circ["cost"] * gs
             h["total_cost"] = sum(c["cost"] for c in h["circuits"].values())
+        bkwh = battery_kwh_by_hour.get(h.get("hour"), 0)
+        h["battery_kwh"] = round(bkwh, 3)
+        try:
+            rate = get_rate(target_d_obj, h.get("tou_period", "off_peak"))
+            h["battery_avoided_cost"] = round(bkwh * rate, 3)
+        except Exception:
+            h["battery_avoided_cost"] = 0
 
 
     circuit_totals = defaultdict(lambda: {"kwh": 0, "cost": 0, "watts": 0})
@@ -364,6 +377,8 @@ async def fetch_egauge_today(target_date=None):
             "cost": round(h["total_cost"], 2),
             "kwh": round(h["total_kwh"], 2),
             "circuits": hour_circuits,
+            "battery_kwh": h.get("battery_kwh", 0),
+            "battery_avoided_cost": h.get("battery_avoided_cost", 0),
         }
         # Mark current partial hour (today only)
         if is_today and h["hour"] == now.hour and h["date"] == target_date_str:
@@ -507,15 +522,31 @@ def _build_history(days):
             solar_hourly = build_hourly_solar_data(days=days)
             if solar_hourly:
                 # Compute per-day grid_share = grid_import / (solar+batt+grid)
+                # Also accumulate per-day battery_kwh + battery_avoided_cost (battery × hourly tou_rate)
+                # imports already present at module level
+                from datetime import datetime as _dt_h
                 day_share = {}
+                day_battery_kwh = {}
+                day_battery_avoided = {}
                 for (date_str, hour_int), h in solar_hourly.items():
                     grid_kwh = h.get("grid_import_kwh", 0) or 0
                     batt = h.get("battery_discharge_kwh", 0) or 0
                     sol = h.get("solar_kwh", 0) or 0
                     if date_str not in day_share:
                         day_share[date_str] = [0.0, 0.0]
+                        day_battery_kwh[date_str] = 0.0
+                        day_battery_avoided[date_str] = 0.0
                     day_share[date_str][0] += grid_kwh
                     day_share[date_str][1] += grid_kwh + batt + sol
+                    day_battery_kwh[date_str] += batt
+                    if batt > 0:
+                        try:
+                            d_obj = _dt_h.strptime(date_str, "%Y-%m-%d").date()
+                            tp = get_tou_period(int(hour_int))
+                            rate = get_rate(d_obj, tp)
+                            day_battery_avoided[date_str] += batt * rate
+                        except Exception:
+                            pass
                 day_grid_share = {d: (g / max(0.001, total)) for d, (g, total) in day_share.items()}
 
                 # Apply to daily entries
@@ -526,6 +557,8 @@ def _build_history(days):
                         d["peak_cost"] = round(d.get("peak_cost", 0) * gs, 2)
                         d["off_peak_cost"] = round(d.get("off_peak_cost", 0) * gs, 2)
                         d["part_peak_cost"] = round(d.get("part_peak_cost", 0) * gs, 2)
+                    d["battery_kwh"] = round(day_battery_kwh.get(d.get("date"), 0), 2)
+                    d["battery_avoided_cost"] = round(day_battery_avoided.get(d.get("date"), 0), 2)
 
                 # Apply to circuit totals (use simple average grid_share over window)
                 if day_grid_share:

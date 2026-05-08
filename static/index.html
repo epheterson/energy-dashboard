@@ -1109,7 +1109,6 @@ setInterval(refreshGlance, 60000);
     <span class="flow-arrow">→</span>
     <div class="flow-node grid" id="gridCard"><span class="flow-label">Grid</span><span class="flow-val" id="gridW">--</span><span class="flow-unit">W</span><span class="flow-soc" id="gridDir">--</span></div>
   </div>
-  </div>
 </div>
 
 <!-- Sub-bar: Monthly / True-up / Battery stats -->
@@ -1963,32 +1962,41 @@ function renderHourlyChart() {
       }
       return h.cost;
     });
+    const batteryAvoided = full24.map(h => h._empty ? 0 : (h.battery_avoided_cost || 0));
     window._hourlyChart = new Chart(ctx, {
       type: 'bar',
       data: {
         labels,
-        datasets: [{
-          label: hasSolar ? 'Grid Cost' : 'Cost',
-          data: gridCosts,
-          backgroundColor: full24.map(h => {
-            const base = touColors[h.tou_period] || touColors.off_peak;
-            if (h._empty) return 'transparent';
-            return h.partial ? base.replace('0.7', '0.35') : base;
-          }),
-          hoverBackgroundColor: full24.map(h => {
-            if (h._empty) return 'transparent';
-            const c = touColors[h.tou_period] || touColors.off_peak;
-            return c.replace('0.7', '1.0');
-          }),
-          borderRadius: 4,
-          borderWidth: full24.map(h => h.partial ? 2 : 0),
-          borderColor: full24.map(h => {
-            if (!h.partial) return 'transparent';
-            const c = touColors[h.tou_period] || touColors.off_peak;
-            return c.replace('0.7', '0.9');
-          }),
-          borderDash: full24.map(h => h.partial ? [4, 2] : []),
-        }]
+        datasets: [
+          {
+            label: hasSolar ? 'Grid Cost' : 'Cost',
+            data: gridCosts,
+            backgroundColor: full24.map(h => {
+              const base = touColors[h.tou_period] || touColors.off_peak;
+              if (h._empty) return 'transparent';
+              return h.partial ? base.replace('0.7', '0.35') : base;
+            }),
+            hoverBackgroundColor: full24.map(h => {
+              if (h._empty) return 'transparent';
+              const c = touColors[h.tou_period] || touColors.off_peak;
+              return c.replace('0.7', '1.0');
+            }),
+            borderRadius: 4,
+            borderWidth: full24.map(h => h.partial ? 2 : 0),
+            borderColor: full24.map(h => {
+              if (!h.partial) return 'transparent';
+              const c = touColors[h.tou_period] || touColors.off_peak;
+              return c.replace('0.7', '0.9');
+            }),
+            borderDash: full24.map(h => h.partial ? [4, 2] : []),
+          },
+          {
+            label: 'Battery (avoided)',
+            data: batteryAvoided,
+            backgroundColor: 'rgba(139,148,163,0.5)',
+            borderRadius: 2,
+          },
+        ]
       },
       options: {
         responsive: true,
@@ -1997,32 +2005,33 @@ function renderHourlyChart() {
           if (elements.length > 0 && !full24[elements[0].index]._empty) openDrilldown(elements[0].index);
         },
         plugins: {
-          legend: { display: false },
+          legend: hasSolar
+            ? { position: 'top', labels: { color: '#8b8fa3', boxWidth: 12, font: { size: 11 } } }
+            : { display: false },
           tooltip: {
-            filter: (item) => item.parsed.y > 0,
+            mode: 'index',
+            intersect: false,
+            filter: (item) => item.parsed.y > 0.005,
             callbacks: {
-              label: (c) => {
-                const i = c.dataIndex;
+              label: (c) => `${c.dataset.label}: $${c.parsed.y.toFixed(2)}`,
+              afterBody: (items) => {
+                if (!items.length) return '';
+                const i = items[0].dataIndex;
                 const h = full24[i];
                 if (h._empty) return '';
-                const gc = gridCosts[i];
-                const fc = h.cost;
-                if (hasSolar && gc < fc - 0.005) {
-                  return `Grid: $${gc.toFixed(2)} (saved $${(fc - gc).toFixed(2)})`;
-                }
-                return `$${gc.toFixed(2)} (${h.kwh.toFixed(1)} kWh)`;
-              },
-              afterLabel: (c) => full24[c.dataIndex]._empty ? '' : 'Click for circuit breakdown'
+                return `${h.kwh.toFixed(1)} kWh · click for circuits`;
+              }
             }
           }
         },
         scales: {
           y: {
-            beginAtZero: true,
+            stacked: true, beginAtZero: true,
             ticks: { callback: v => '$' + v.toFixed(2), color: '#8b8fa3' },
             grid: { color: 'rgba(45,49,64,0.5)' },
           },
           x: {
+            stacked: true,
             ticks: { color: '#8b8fa3' },
             grid: { display: false },
           }
@@ -2259,21 +2268,27 @@ function renderHistoryChart() {
         labels,
         datasets: [
           {
-            label: 'Off-Peak',
+            label: 'Off-Peak (grid)',
             data: daily.map(d => d.off_peak_cost),
             backgroundColor: 'rgba(34,197,94,0.7)',
             borderRadius: 2,
           },
           {
-            label: 'Part-Peak',
+            label: 'Part-Peak (grid)',
             data: daily.map(d => d.part_peak_cost),
             backgroundColor: 'rgba(234,179,8,0.7)',
             borderRadius: 2,
           },
           {
-            label: 'Peak',
+            label: 'Peak (grid)',
             data: daily.map(d => d.peak_cost),
             backgroundColor: 'rgba(239,68,68,0.7)',
+            borderRadius: 2,
+          },
+          {
+            label: 'Battery (avoided)',
+            data: daily.map(d => d.battery_avoided_cost || 0),
+            backgroundColor: 'rgba(139,148,163,0.5)',
             borderRadius: 2,
           },
         ]
@@ -2291,7 +2306,9 @@ function renderHistoryChart() {
               label: (c) => `${c.dataset.label}: $${c.parsed.y.toFixed(2)}`,
               afterBody: (items) => {
                 const day = daily[items[0].dataIndex];
-                return `Total: $${day.total_cost.toFixed(2)} (${day.total_kwh.toFixed(1)} kWh)`;
+                const paid = day.total_cost.toFixed(2);
+                const saved = (day.battery_avoided_cost || 0).toFixed(2);
+                return `Paid (grid): $${paid} · Saved (battery): $${saved} · ${day.total_kwh.toFixed(1)} kWh`;
               }
             }
           }
@@ -2776,19 +2793,33 @@ function updateBatteryForecast(d) {
     capStatus.style.color = '';
   }
 
-  // Reasoning — structured key/value grid (scanable, no run-on paragraph)
+  // Reasoning — compact 2-column grid (skips items already in top stats)
   const reasonEl = document.getElementById('forecastReasoning');
   while (reasonEl.firstChild) reasonEl.removeChild(reasonEl.firstChild);
   if (d) {
     const grid = document.createElement('div');
     grid.style.display = 'grid';
-    grid.style.gridTemplateColumns = 'max-content 1fr';
-    grid.style.gap = '4px 16px';
+    grid.style.gridTemplateColumns = 'max-content 1fr max-content 1fr';
+    grid.style.gap = '4px 14px';
     grid.style.fontFamily = 'ui-monospace,SFMono-Regular,Menlo,monospace';
     grid.style.fontSize = '12px';
     grid.style.color = 'var(--text-muted)';
+    const cells = [];
     function row(k, v, valClass) {
       if (v == null) return;
+      cells.push({ k, v, valClass });
+    }
+    row('daytime load', d.predicted_daytime_load_kwh != null ? d.predicted_daytime_load_kwh.toFixed(1)+' kWh' : null);
+    row('overnight load', d.predicted_overnight_load_kwh != null ? d.predicted_overnight_load_kwh.toFixed(1)+' kWh' : null);
+    row('solar excess', d.solar_excess_kwh != null ? d.solar_excess_kwh.toFixed(1)+' kWh' : null);
+    row('battery in (rt)', d.battery_in_from_solar_kwh != null ? d.battery_in_from_solar_kwh.toFixed(1)+' kWh' : null);
+    row('cap target', d.target_cap_pct != null ? d.target_cap_pct.toFixed(0)+'%' : null);
+    row('cap floor', d.floor_cap_pct != null ? d.floor_cap_pct.toFixed(0)+'%' : null);
+    row('predicted export', d.predicted_export_kwh != null ? d.predicted_export_kwh.toFixed(1)+' kWh' : null,
+        (d.predicted_export_kwh != null && d.predicted_export_kwh < 1) ? 'good' : (d.predicted_export_kwh > 5 ? 'warn' : null));
+    row('overnight import', d.predicted_overnight_grid_import_kwh != null ? d.predicted_overnight_grid_import_kwh.toFixed(1)+' kWh' : null,
+        (d.predicted_overnight_grid_import_kwh != null && d.predicted_overnight_grid_import_kwh < 1) ? 'good' : null);
+    cells.forEach(({ k, v, valClass }) => {
       const kEl = document.createElement('div'); kEl.textContent = k; kEl.style.opacity = '0.6';
       const vEl = document.createElement('div'); vEl.textContent = v;
       vEl.style.fontVariantNumeric = 'tabular-nums';
@@ -2796,21 +2827,7 @@ function updateBatteryForecast(d) {
       else if (valClass === 'warn') vEl.style.color = 'var(--yellow)';
       else vEl.style.color = 'var(--text)';
       grid.appendChild(kEl); grid.appendChild(vEl);
-    }
-    const sp = d.solar_prediction || {};
-    row('cloud cover', sp.cloud_cover_pct != null ? sp.cloud_cover_pct.toFixed(0)+'%' : null);
-    row('predicted solar', sp.predicted_solar_kwh != null ? sp.predicted_solar_kwh.toFixed(1)+' kWh' : null);
-    row('daytime load', d.predicted_daytime_load_kwh != null ? d.predicted_daytime_load_kwh.toFixed(1)+' kWh' : null);
-    row('overnight load', d.predicted_overnight_load_kwh != null ? d.predicted_overnight_load_kwh.toFixed(1)+' kWh' : null);
-    row('solar excess', d.solar_excess_kwh != null ? d.solar_excess_kwh.toFixed(1)+' kWh' : null);
-    row('battery in (after rt)', d.battery_in_from_solar_kwh != null ? d.battery_in_from_solar_kwh.toFixed(1)+' kWh' : null);
-    row('cap target', d.target_cap_pct != null ? d.target_cap_pct.toFixed(0)+'%' : null);
-    row('cap floor', d.floor_cap_pct != null ? d.floor_cap_pct.toFixed(0)+'%' : null);
-    row('recommended', d.recommended_cap != null ? d.recommended_cap+'%' : null);
-    row('predicted export', d.predicted_export_kwh != null ? d.predicted_export_kwh.toFixed(1)+' kWh' : null,
-        (d.predicted_export_kwh != null && d.predicted_export_kwh < 1) ? 'good' : (d.predicted_export_kwh > 5 ? 'warn' : null));
-    row('predicted overnight import', d.predicted_overnight_grid_import_kwh != null ? d.predicted_overnight_grid_import_kwh.toFixed(1)+' kWh' : null,
-        (d.predicted_overnight_grid_import_kwh != null && d.predicted_overnight_grid_import_kwh < 1) ? 'good' : null);
+    });
     reasonEl.appendChild(grid);
     reasonEl.style.display = '';
   } else {
