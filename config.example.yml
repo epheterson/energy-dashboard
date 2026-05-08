@@ -48,3 +48,50 @@ solar:
 # Alert Thresholds
 alerts:
   high_peak_usage_percent: 30
+
+# ====== EV charging cost analysis (optional) ======
+# Vehicle data pulled from HA (Tesla integration creates these auto, or any
+# HA-exposed EV).
+ev:
+  enabled: false
+  gas_price_per_gallon: 5.00
+  gas_baseline_mpg: 25  # Comparison baseline (sedan ~25, truck ~18, hybrid ~45)
+  vehicles:
+    car1:
+      name: "Tesla Model Y"
+      charger_power: "sensor.car1_charger_power"
+      charge_energy_added: "sensor.car1_charge_energy_added"
+      battery_level: "sensor.car1_battery_level"
+      battery_range: "sensor.car1_battery_range"
+      odometer: "sensor.car1_odometer"
+      charging_state: "sensor.car1_charging_state"
+      efficiency_mi_per_kwh: 4.0
+
+# ====== Detailed Billing (optional, for accurate invoice reproduction) ======
+billing:
+  nem_version: "2"               # "2" or "3" — affects export credit calc
+  trueup_month: 4
+  meter_read_day: 5
+  cca:
+    enabled: false
+    provider: ""
+    storage_credit_monthly: 0.0
+  delivery:
+    winter: { peak: 0.30, part_peak: 0.28, off_peak: 0.20 }
+    summer: { peak: 0.30, part_peak: 0.28, off_peak: 0.20 }
+  generation:
+    winter: { peak: 0.33, part_peak: 0.32, off_peak: 0.20 }
+    summer: { peak: 0.33, part_peak: 0.32, off_peak: 0.20 }
+  nem_adjustments:
+    net_per_kwh: 0.05
+  fixed:
+    daily_charge: 0.50
+  lat: 37.7749
+  lon: -122.4194
+  solar_capacity_kw: 9.6
+  tesla:
+    site_id: 0          # Find via HA Devices & Services -> Tesla Fleet
+    token: ""           # Leave blank if HA Tesla Fleet integration is set up
+
+# Public-facing dashboard URL (used in email reports). Default for local.
+dashboard_url: "http://localhost:8400"

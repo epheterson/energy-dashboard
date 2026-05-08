@@ -4,3 +4,10 @@ data/
 charts/
 reports/
 __pycache__/
+
+# Local backups
+*.bak
+*.bak-*
+
+# Local bill data (PDFs, seed scripts with personal financials)
+bills/

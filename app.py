@@ -936,6 +936,61 @@ async def api_prediction_log():
     return {"status": "logged", "prediction": prediction}
 
 
+
+@app.get("/api/health")
+async def api_health():
+    """Tier-by-tier health check for first-run validation."""
+    import os
+    from pathlib import Path
+    tiers = {"dashboard": "ok"}
+
+    egauge_url = os.environ.get("EGAUGE_URL", "")
+    egauge_user = os.environ.get("EGAUGE_USER", "")
+    egauge_pass = os.environ.get("EGAUGE_PASSWORD", "")
+    if not (egauge_url and egauge_user and egauge_pass):
+        tiers["egauge"] = "not_configured"
+    else:
+        tiers["egauge"] = f"ok (configured: {egauge_url})"
+
+    ha_url = os.environ.get("HA_URL", "")
+    ha_token = os.environ.get("HA_TOKEN", "")
+    if not ha_url or not ha_token:
+        tiers["home_assistant"] = "not_configured (solar disabled)"
+    else:
+        try:
+            import urllib.request
+            req = urllib.request.Request(f"{ha_url}/api/", headers={"Authorization": f"Bearer {ha_token}"})
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                tiers["home_assistant"] = "ok" if resp.status == 200 else f"http_{resp.status}"
+        except Exception as e:
+            tiers["home_assistant"] = f"unreachable: {str(e)[:60]}"
+
+    try:
+        from tesla_energy import _get_tesla_config
+        site_id, token = _get_tesla_config()
+        if not site_id:
+            tiers["tesla"] = "not_configured"
+        elif not token:
+            tiers["tesla"] = "site_id set but token missing — check HA Tesla Fleet integration"
+        else:
+            tiers["tesla"] = "ok"
+    except Exception as e:
+        tiers["tesla"] = f"error: {str(e)[:60]}"
+
+    cap_path = Path(__file__).parent / "data" / "cap_history.json"
+    if not cap_path.exists():
+        tiers["forecast"] = "no_data_yet — hit /api/battery/recommended-cap to seed"
+    else:
+        try:
+            import json as _j
+            cap = _j.load(open(cap_path))
+            tiers["forecast"] = f"ok ({len(cap)} days of history)"
+        except Exception as e:
+            tiers["forecast"] = f"error: {str(e)[:60]}"
+
+    overall = "ok" if all(v.startswith("ok") for v in tiers.values()) else "degraded"
+    return {"status": overall, "tiers": tiers}
+
 @app.get("/api/battery/prediction-history")
 async def api_prediction_history():
     """Historical predictions with actual solar for accuracy tracking."""

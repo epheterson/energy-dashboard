@@ -74,7 +74,11 @@ def calculate_billing_from_solar(solar_data, days_in_period):
     nem_charges = total_delivery_cost + nem_adjustments - total_export_credit
     generation_charges = max(0, total_generation_cost - storage_credit)
     fixed_charges = daily_fixed * days_in_period
-    monthly_electric_bill = generation_charges + fixed_charges
+    # Total monthly bill = net delivery (nem_charges) + net generation + fixed.
+    # Including delivery is critical — its often the largest component for net
+    # consumers. Previously this only summed generation + fixed, under-reporting
+    # by ~70%.
+    monthly_electric_bill = nem_charges + generation_charges + fixed_charges
 
     return {
         'nem_charges': round(nem_charges, 2),

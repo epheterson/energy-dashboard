@@ -59,9 +59,25 @@ SUMMER_EXPORT_CREDITS = _credits.get('summer', {'peak': 0.16, 'part_peak': 0.14,
 
 
 def get_export_credit(date, tou_period):
-    """Get export credit rate for a given date and TOU period."""
+    """Get export credit rate for a given date and TOU period.
+
+    NEM 2.0: monthly settlement at GENERATION portion of retail rate.
+    NEM 3.0 / NBT: avoided-cost rate from solar.export_credits config.
+
+    Branches on billing.nem_version. Defaults to NEM 2 (legacy).
+    """
+    cfg = get_config()
+    nem_version = str(cfg.get("billing", {}).get("nem_version", "2"))
+    if nem_version == "2":
+        season_key = "summer" if is_summer(date) else "winter"
+        gen = cfg.get("billing", {}).get("generation", {}).get(season_key, {})
+        if gen:
+            return gen.get(tou_period, 0)
+        retail = cfg.get("rates", {}).get(season_key, {}).get(tou_period, 0)
+        delivery = cfg.get("billing", {}).get("delivery", {}).get(season_key, {}).get(tou_period, 0)
+        return max(0, retail - delivery)
     credits = SUMMER_EXPORT_CREDITS if is_summer(date) else WINTER_EXPORT_CREDITS
-    return credits[tou_period]
+    return credits.get(tou_period, 0)
 
 
 # ==========================================

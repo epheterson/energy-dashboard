@@ -141,7 +141,7 @@ def fetch_ev_live():
 
         # Gas comparison
         gas_price = get_ev_config().get('gas_price_per_gallon', 4.50)
-        gas_mpg = 25  # Average car
+        gas_mpg = get_ev_config().get("gas_baseline_mpg", 25)  # Average gasoline car (override per setup)
         gas_cost_per_mile = gas_price / gas_mpg
         veh['gas_cost_per_mile'] = round(gas_cost_per_mile, 3)
         veh['savings_vs_gas_pct'] = round((1 - veh['cost_per_mile'] / gas_cost_per_mile) * 100, 1) if gas_cost_per_mile > 0 else 0
