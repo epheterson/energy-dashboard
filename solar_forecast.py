@@ -216,13 +216,17 @@ def _auto_tune_ratio():
 
 
 def predict_loads(lookback_days=14, sunrise_hour=6, sunset_hour=19):
-    """Predict tomorrow's daytime + overnight load from rolling history.
+    """Predict tomorrow daytime + overnight loads, separating EV charging.
 
-    Daytime = hours [sunrise_hour, sunset_hour) — when solar is producing
-    Overnight = hours [sunset_hour, 24) + [0, sunrise_hour) — battery covers
+    EV charging draws from grid directly (Powerwall does not serve EV by
+    default). So overnight EV load should NOT count toward the battery
+    floor — battery only needs to cover non-EV base load.
 
-    Returns dict with predicted daytime_kwh + overnight_kwh in kWh.
-    Uses 14-day rolling average per hour-of-day, then sums into the buckets.
+    Returns dict with:
+      daytime_kwh         — total daytime consumption (for solar excess calc)
+      overnight_kwh       — total overnight consumption (informational)
+      overnight_base_kwh  — overnight WITHOUT EV (drives floor calc)
+      overnight_ev_kwh    — overnight EV charging (informational)
     """
     import sqlite3, json
     from pathlib import Path
@@ -230,68 +234,59 @@ def predict_loads(lookback_days=14, sunrise_hour=6, sunset_hour=19):
 
     db = Path(__file__).parent / "data" / "egauge_history.db"
     if not db.exists():
-        # Fallback: use config-defined defaults
-        return {
-            "daytime_kwh": 25.0,
-            "overnight_kwh": 15.0,
-            "source": "fallback_defaults",
-        }
+        return {"daytime_kwh": 25.0, "overnight_kwh": 15.0, "overnight_base_kwh": 10.0, "overnight_ev_kwh": 5.0, "source": "fallback_defaults"}
 
     cutoff_ts = int((datetime.now() - timedelta(days=lookback_days)).timestamp())
-
     conn = sqlite3.connect(str(db))
     rows = conn.execute(
-        "SELECT hour, register_data FROM hourly_consumption WHERE timestamp >= ?",
+        """SELECT hc.hour, hc.register_data FROM hourly_consumption hc
+           WHERE hc.timestamp >= ?
+           AND hc.timestamp = (SELECT MAX(timestamp) FROM hourly_consumption
+                               WHERE date = hc.date AND hour = hc.hour)""",
         (cutoff_ts,),
     ).fetchall()
     conn.close()
 
     if not rows:
-        return {"daytime_kwh": 25.0, "overnight_kwh": 15.0, "source": "no_history"}
+        return {"daytime_kwh": 25.0, "overnight_kwh": 15.0, "overnight_base_kwh": 10.0, "overnight_ev_kwh": 5.0, "source": "no_history"}
 
-    # Sum consumption per hour-of-day across all collected rows
-    # eGauge "Usage [kWh]" is total; per-circuit values may be negative for
-    # generation registers. We want net consumption = positive values only.
-    by_hour = {h: [] for h in range(24)}
+    by_hour_total = {h: [] for h in range(24)}
+    by_hour_ev = {h: [] for h in range(24)}
     for hour, register_json in rows:
         try:
             registers = json.loads(register_json)
         except Exception:
             continue
-        # "Usage [kWh]" is the cleanest total if present
         total = registers.get("Usage [kWh]")
-        if total is None:
-            # Fallback: sum positive consumption registers (skip Generation/Total Power which can be negative)
+        if total is None or total == 0:
             total = sum(
-                v
-                for k, v in registers.items()
-                if isinstance(v, (int, float))
-                and v > 0
-                and "Generation" not in k
-                and "Total Power" not in k
+                v for k, v in registers.items()
+                if isinstance(v, (int, float)) and v > 0
+                and "Generation" not in k and "Total Power" not in k
             )
-        if total is not None:
-            by_hour[hour].append(total)
+        ev = registers.get("EV Charger [kWh]", 0)
+        # eGauge sometimes stores EV as negative (consumption convention varies)
+        ev = abs(ev) if isinstance(ev, (int, float)) else 0
+        if total is not None and total >= 0:
+            by_hour_total[hour].append(total)
+            by_hour_ev[hour].append(ev)
 
-    # Average per hour-of-day
-    avg_by_hour = {
-        h: (sum(vals) / len(vals)) if vals else 0.0 for h, vals in by_hour.items()
-    }
+    avg_total = {h: (sum(v)/len(v)) if v else 0.0 for h, v in by_hour_total.items()}
+    avg_ev = {h: (sum(v)/len(v)) if v else 0.0 for h, v in by_hour_ev.items()}
 
-    daytime_kwh = sum(avg_by_hour[h] for h in range(sunrise_hour, sunset_hour))
-    overnight_kwh = sum(
-        avg_by_hour[h]
-        for h in list(range(sunset_hour, 24)) + list(range(0, sunrise_hour))
-    )
+    daytime_kwh = sum(avg_total[h] for h in range(sunrise_hour, sunset_hour))
+    overnight_total = sum(avg_total[h] for h in list(range(sunset_hour, 24)) + list(range(0, sunrise_hour)))
+    overnight_ev = sum(avg_ev[h] for h in list(range(sunset_hour, 24)) + list(range(0, sunrise_hour)))
+    overnight_base = max(0, overnight_total - overnight_ev)
 
     return {
         "daytime_kwh": round(daytime_kwh, 1),
-        "overnight_kwh": round(overnight_kwh, 1),
+        "overnight_kwh": round(overnight_total, 1),
+        "overnight_base_kwh": round(overnight_base, 1),
+        "overnight_ev_kwh": round(overnight_ev, 1),
         "source": f"{lookback_days}d_avg",
         "lookback_days": lookback_days,
-        "samples_per_hour": {h: len(by_hour[h]) for h in range(24)},
     }
-
 
 
 def recommend_charge_cap():
@@ -321,6 +316,7 @@ def recommend_charge_cap():
     loads = predict_loads()
     daytime_load = loads["daytime_kwh"]
     overnight_load = loads["overnight_kwh"]
+    overnight_base_load = loads.get("overnight_base_kwh", overnight_load)
 
     # How much solar is left over after covering daytime load? That goes to battery.
     solar_excess = max(0, predicted_solar - daytime_load)
@@ -328,10 +324,16 @@ def recommend_charge_cap():
     fill_pct_from_solar = battery_in / BATTERY_CAPACITY_KWH
 
     # Target cap: battery hits 0.99 at sunset
-    target_cap_pct = 0.99 - fill_pct_from_solar
+    # End-of-day target: 1.0 = zero-export goal. Configurable via solar.target_end_of_day_pct.
+    # Caveat: targeting 1.0 means battery may hit 100% early if forecast underpredicts solar
+    # (then exports excess). 0.99 leaves a small buffer at cost of always exporting ~1% capacity.
+    target_eod = cfg.get("solar", {}).get("target_end_of_day_pct", 1.0)
+    target_cap_pct = target_eod - fill_pct_from_solar
 
     # Floor cap: battery must have enough for overnight + safety
-    min_cap_pct = (overnight_load / efficiency) / BATTERY_CAPACITY_KWH + safety_margin
+    # Floor uses BASE overnight load only — EV charging draws from grid directly,
+    # not from Powerwall (default Tesla behavior).
+    min_cap_pct = (overnight_base_load / efficiency) / BATTERY_CAPACITY_KWH + safety_margin
 
     chosen_cap_pct = max(min_cap_pct, target_cap_pct)
     chosen_cap_pct = min(1.0, max(0.05, chosen_cap_pct))
