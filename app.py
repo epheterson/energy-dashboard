@@ -306,6 +306,45 @@ async def fetch_egauge_today(target_date=None):
     # Filter to target date only
     day_hours = [h for h in hourly if h.get("date") == target_date_str]
 
+    # Source attribution: discount cost by non-grid share (battery + solar are
+    # essentially free; only grid imports cost retail rates). Pull hourly grid
+    # vs battery breakdown from /api/solar's data layer if solar is enabled.
+    grid_share_by_hour = {}  # {hour_int: 0.0..1.0 (grid fraction of consumption)}
+    try:
+        from solar_integration import is_solar_enabled, build_hourly_solar_data
+        if is_solar_enabled():
+            # Pull enough history to include target date (default 7d)
+            from datetime import date as _date_cls, datetime as _dt
+            try:
+                target_d = _dt.strptime(target_date_str, "%Y-%m-%d").date()
+                age_days = max(1, (_date_cls.today() - target_d).days + 1)
+            except Exception:
+                age_days = 7
+            solar_data = build_hourly_solar_data(days=min(30, age_days))
+            # build_hourly_solar_data returns dict keyed by (date, hour) tuple
+            if isinstance(solar_data, dict):
+                for (date_str, hour_int), h in solar_data.items():
+                    if date_str != target_date_str:
+                        continue
+                    grid_kwh = h.get("grid_import_kwh", 0) or 0
+                    batt_disc = h.get("battery_discharge_kwh", 0) or 0
+                    solar_kwh = h.get("solar_kwh", 0) or 0
+                    total = max(0.001, grid_kwh + batt_disc + solar_kwh)
+                    grid_share_by_hour[hour_int] = max(0.0, min(1.0, grid_kwh / total))
+    except Exception as _e:
+        # If solar not configured or fetch fails, fall back to charging full rate (legacy behavior)
+        pass
+
+    # Apply discount: cost = circuit_kwh × rate × grid_share_for_this_hour.
+    # If no solar data (grid_share unknown), default 1.0 (charge full rate — original behavior).
+    for h in day_hours:
+        gs = grid_share_by_hour.get(h.get("hour"), 1.0)
+        if gs < 1.0:
+            for circ in h["circuits"].values():
+                circ["cost"] = circ["cost"] * gs
+            h["total_cost"] = sum(c["cost"] for c in h["circuits"].values())
+
+
     circuit_totals = defaultdict(lambda: {"kwh": 0, "cost": 0, "watts": 0})
     total_cost = 0
     total_kwh = 0
@@ -1028,6 +1067,8 @@ async def api_prediction_history():
             "cloud_cover": e.get("cloud_cover"),
             "recommended_cap": e.get("recommended_cap"),
             "actual_full_hour": e.get("actual_full_hour"),
+            "actual_export_kwh": e.get("actual_export_kwh"),
+            "actual_grid_import_kwh": e.get("actual_grid_import_kwh"),
         })
 
     history.sort(key=lambda x: x.get("date", ""), reverse=True)

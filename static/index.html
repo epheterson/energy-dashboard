@@ -1264,7 +1264,7 @@ setInterval(refreshGlance, 60000);
           <th style="text-align:right;font-weight:500">Predicted</th>
           <th style="text-align:right;font-weight:500">Actual</th>
           <th style="text-align:right;font-weight:500">Cap</th>
-          <th style="text-align:right;font-weight:500">Filled To</th>
+          <th style="text-align:right;font-weight:500">Exported</th>
         </tr></thead>
         <tbody id="forecastHistoryRows"></tbody>
       </table>
@@ -2810,7 +2810,13 @@ async function loadForecastHistory() {
         <td style="text-align:right;color:var(--solar)">${h.predicted_solar?.toFixed(1) || '--'}</td>
         <td style="text-align:right">${actual} <span style="font-size:10px;color:${errColor}">${errText}</span></td>
         <td style="text-align:right;color:var(--green)">${h.recommended_cap || '--'}%</td>
-        <td style="text-align:right;color:var(--text-muted)">--</td>
+        <td style="text-align:right">${(() => {
+          const ex = h.actual_export_kwh;
+          if (ex == null) return '<span style=\"color:var(--text-muted)\">—</span>';
+          if (ex < 0.5) return '<span style=\"color:var(--green)\">0</span>';
+          const c = ex < 5 ? 'var(--yellow)' : 'var(--red)';
+          return `<span style=\"color:${c}\">${ex.toFixed(1)}</span>`;
+        })()}</td>
       </tr>`;
     }
     if (!d.history?.length) {

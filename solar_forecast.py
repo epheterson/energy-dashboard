@@ -420,7 +420,7 @@ def recommend_charge_cap():
 
 
 
-def record_actual_fill(date, full_hour, actual_solar_kwh=None):
+def record_actual_fill(date, full_hour, actual_solar_kwh=None, actual_export_kwh=None, actual_grid_import_kwh=None):
     """Record when battery actually hit 100% for auto-tuning feedback.
 
     Called by the energy dashboard with Tesla SOC data to close the loop.
