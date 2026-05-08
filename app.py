@@ -499,6 +499,48 @@ def _build_history(days):
             }
         )
 
+    # Per-day grid_share discount: cost should reflect that battery+solar
+    # covered part of consumption (already paid for or free), not full retail.
+    try:
+        from solar_integration import is_solar_enabled, build_hourly_solar_data
+        if is_solar_enabled():
+            solar_hourly = build_hourly_solar_data(days=days)
+            if solar_hourly:
+                # Compute per-day grid_share = grid_import / (solar+batt+grid)
+                day_share = {}
+                for (date_str, hour_int), h in solar_hourly.items():
+                    grid_kwh = h.get("grid_import_kwh", 0) or 0
+                    batt = h.get("battery_discharge_kwh", 0) or 0
+                    sol = h.get("solar_kwh", 0) or 0
+                    if date_str not in day_share:
+                        day_share[date_str] = [0.0, 0.0]
+                    day_share[date_str][0] += grid_kwh
+                    day_share[date_str][1] += grid_kwh + batt + sol
+                day_grid_share = {d: (g / max(0.001, total)) for d, (g, total) in day_share.items()}
+
+                # Apply to daily entries
+                for d in daily:
+                    gs = day_grid_share.get(d.get("date"), 1.0)
+                    if gs < 1.0:
+                        d["total_cost"] = round(d["total_cost"] * gs, 2)
+                        d["peak_cost"] = round(d.get("peak_cost", 0) * gs, 2)
+                        d["off_peak_cost"] = round(d.get("off_peak_cost", 0) * gs, 2)
+                        d["part_peak_cost"] = round(d.get("part_peak_cost", 0) * gs, 2)
+
+                # Apply to circuit totals (use simple average grid_share over window)
+                if day_grid_share:
+                    avg_share = sum(day_grid_share.values()) / len(day_grid_share)
+                    for c in circuits:
+                        c["total_cost"] = round(c["total_cost"] * avg_share, 2)
+                        c["avg_daily_cost"] = round(c["avg_daily_cost"] * avg_share, 2)
+                        for period in c.get("by_tou", {}):
+                            c["by_tou"][period]["cost"] = round(
+                                c["by_tou"][period].get("cost", 0) * avg_share, 2
+                            )
+    except Exception as _e:
+        # Solar unconfigured or fetch failed — leave costs at gross retail
+        pass
+
     return {
         "days": days,
         "circuits": circuits,
