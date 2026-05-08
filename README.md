@@ -201,3 +201,60 @@ Source is COPY'd into the Docker image at build time:
 docker compose up -d --build
 ```
 A simple `docker restart` does NOT pick up code changes.
+
+## Optional: auto-enforce the cap via Home Assistant
+
+The dashboard *recommends* a daily grid-charge cap based on tomorrow's solar forecast — but doesn't push the setting to your Powerwall directly. To close the loop, add a REST sensor + automation in your HA config:
+
+### 1. Poll the dashboard's recommendation (HA `configuration.yaml`)
+
+```yaml
+# Predictive battery charge cap from energy dashboard
+rest:
+  - resource: http://your-dashboard-host:8400/api/battery/recommended-cap
+    scan_interval: 3600  # Update hourly
+    sensor:
+      - name: "Recommended Grid Charge Cap"
+        unique_id: recommended_grid_charge_cap
+        value_template: "{{ value_json.recommended_cap }}"
+        unit_of_measurement: "%"
+        json_attributes:
+          - solar_prediction
+          - solar_to_battery_kwh
+          - reasoning
+```
+
+### 2. Stop grid charging when SOC reaches the cap (HA `automations.yaml`)
+
+```yaml
+- id: grid_charge_cap_enforce
+  alias: Grid Charge Cap (Weather-Predictive)
+  description: >
+    Stop grid charging when SOC reaches the weather-predicted cap.
+    Cap is set by energy dashboard based on solar forecast.
+  triggers:
+    - trigger: template
+      value_template: >
+        {% set soc = states("sensor.solar_power_plant_percentage_charged") | float(0) %}
+        {% set cap = states("sensor.recommended_grid_charge_cap") | float(80) %}
+        {{ soc > cap }}
+  conditions:
+    - condition: state
+      entity_id: switch.solar_power_plant_allow_charging_from_grid
+      state: 'on'
+  actions:
+    - action: switch.turn_off
+      target:
+        entity_id: switch.solar_power_plant_allow_charging_from_grid
+  mode: single
+```
+
+### How the loop works
+
+1. Powerwall is configured (in Tesla app) to charge from grid during off-peak hours
+2. HA REST sensor polls dashboard hourly → reads recommended cap (e.g. 54%)
+3. Automation watches SOC; when it crosses the cap, turns OFF grid charging
+4. Solar then fills the rest during the day → battery hits 100% later in the afternoon
+5. Maximizes self-consumption + minimizes grid charge cost
+
+Replace entity IDs (`solar_power_plant_*`) with your own Powerwall/HA entity names.
