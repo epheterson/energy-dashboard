@@ -889,6 +889,206 @@ tr:last-child td { border-bottom: none; }
   <div style="font-size:13px;color:var(--text-muted)" id="lastUpdate">Connecting...</div>
 </header>
 
+
+<!-- ================ NEW: At-a-Glance Summary Widget ================ -->
+<style>
+  .glance {
+    margin: -8px 0 24px;
+    padding: 0;
+  }
+  .glance-status {
+    display: flex; align-items: center; gap: 16px;
+    padding: 10px 16px;
+    background: var(--bg-elevated, #1a1a1a);
+    border-radius: 12px 12px 0 0;
+    font-size: 13px; color: var(--text-muted);
+    border-bottom: 1px solid var(--border, rgba(255,255,255,0.06));
+  }
+  .glance-status .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--green, #10b981);
+    flex-shrink: 0;
+  }
+  .glance-status .dot.warn { background: var(--yellow, #f59e0b); }
+  .glance-status .dot.bad  { background: var(--red, #ef4444); }
+  .glance-status .sep { color: var(--text-muted); opacity: 0.4; }
+
+  .glance-hero {
+    background: var(--bg-elevated, #1a1a1a);
+    padding: 24px 32px;
+    border-radius: 0 0 12px 12px;
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 32px;
+  }
+  .glance-num { display: flex; flex-direction: column; }
+  .glance-val {
+    font-size: 36px; font-weight: 600; line-height: 1.05;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.02em;
+  }
+  .glance-val.success { color: var(--green, #10b981); }
+  .glance-val.warn    { color: var(--yellow, #f59e0b); }
+  .glance-val.muted   { color: var(--text-muted); }
+  .glance-unit {
+    font-size: 14px; font-weight: 400; color: var(--text-muted);
+    margin-left: 4px;
+  }
+  .glance-label {
+    font-size: 12px; color: var(--text-muted);
+    margin-top: 4px; text-transform: uppercase; letter-spacing: 0.04em;
+  }
+  .glance-plan {
+    grid-column: 1 / -1;
+    margin-top: 8px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border, rgba(255,255,255,0.06));
+    font-size: 13px; color: var(--text-muted);
+    line-height: 1.5;
+  }
+  .glance-plan strong { color: var(--text, #fff); font-weight: 500; }
+  .glance-plan .arrow { opacity: 0.5; margin: 0 6px; }
+
+  @media (max-width: 720px) {
+    .glance-hero { grid-template-columns: 1fr; gap: 16px; padding: 20px; }
+    .glance-val { font-size: 28px; }
+  }
+</style>
+
+<div class="glance" id="glanceWidget" data-solar>
+  <div class="glance-status">
+    <span class="dot" id="glanceDot"></span>
+    <span id="glanceHeadline">Loading…</span>
+    <span class="sep">·</span>
+    <span id="glanceStreak"></span>
+  </div>
+  <div class="glance-hero">
+    <div class="glance-num">
+      <div><span class="glance-val success" id="glanceSelfSuff">--</span><span class="glance-unit">%</span></div>
+      <div class="glance-label">self-sufficient today</div>
+    </div>
+    <div class="glance-num">
+      <div><span class="glance-val" id="glanceNetCost">--</span></div>
+      <div class="glance-label" id="glanceNetCostLabel">net cost today</div>
+    </div>
+    <div class="glance-num">
+      <div><span class="glance-val" id="glanceExport">--</span><span class="glance-unit">kWh</span></div>
+      <div class="glance-label">exported today</div>
+    </div>
+    <div class="glance-plan" id="glancePlan">Tomorrow plan loading…</div>
+  </div>
+</div>
+
+<script>
+function _glanceSpan(text, cls) {
+  const s = document.createElement('span');
+  if (cls) s.className = cls;
+  s.textContent = text;
+  return s;
+}
+
+async function refreshGlance() {
+  try {
+    const [todayR, solarR, capR, capHistR] = await Promise.all([
+      fetch('/api/today').then(r => r.ok ? r.json() : null),
+      fetch('/api/solar?days=1').then(r => r.ok ? r.json() : null),
+      fetch('/api/battery/recommended-cap').then(r => r.ok ? r.json() : null),
+      fetch('/api/battery/prediction-history').then(r => r.ok ? r.json() : null),
+    ]);
+
+    const totalKwh = todayR?.total_kwh ?? 0;
+    const totalCost = todayR?.total_cost ?? 0;
+
+    const solarKwh = solarR?.solar_kwh ?? 0;
+    const gridImportKwh = solarR?.grid_import_kwh ?? 0;
+    const gridExportKwh = solarR?.grid_export_kwh ?? 0;
+    const battToHomeKwh = solarR?.battery?.discharge_kwh ?? 0;
+    const solarToHomeKwh = Math.max(0, (solarR?.solar_kwh ?? 0) - (solarR?.grid_export_kwh ?? 0) - (solarR?.battery?.charge_kwh ?? 0));
+
+    const consumptionKwh = solarR?.consumption_kwh ?? totalKwh;
+    let selfSuffPct = 0;
+    if (consumptionKwh > 0) {
+      selfSuffPct = Math.max(0, Math.min(100, Math.round(((consumptionKwh - gridImportKwh) / consumptionKwh) * 100)));
+    }
+
+    // Status
+    let dotClass = 'dot';
+    let headline = '✓ Self-sufficient today';
+    if (gridImportKwh > totalKwh * 0.4) { dotClass = 'dot bad'; headline = 'Heavy grid import today'; }
+    else if (gridImportKwh > 1) { dotClass = 'dot warn'; headline = 'Some grid import today'; }
+
+    document.getElementById('glanceDot').className = dotClass;
+    document.getElementById('glanceHeadline').textContent = headline;
+
+    // Streak placeholder (real streak when backfill writes actual_export_kwh)
+    const streakDays = capHistR?.history ? capHistR.history.length : 0;
+    document.getElementById('glanceStreak').textContent =
+      streakDays > 0 ? `${streakDays}-day prediction history` : '';
+
+    // Big numbers
+    const selfEl = document.getElementById('glanceSelfSuff');
+    selfEl.textContent = selfSuffPct;
+    selfEl.className = 'glance-val ' + (selfSuffPct >= 80 ? 'success' : selfSuffPct >= 50 ? 'warn' : 'muted');
+
+    const netCostEl = document.getElementById('glanceNetCost');
+    netCostEl.textContent = '$' + ((solarR?.net_cost ?? totalCost) || 0).toFixed(2);
+    netCostEl.className = 'glance-val ' + (totalCost < 1 ? 'success' : totalCost < 5 ? '' : 'warn');
+
+    const expEl = document.getElementById('glanceExport');
+    expEl.textContent = (gridExportKwh || 0).toFixed(1);
+    expEl.className = 'glance-val ' + (gridExportKwh < 1 ? 'success' : gridExportKwh < 5 ? 'warn' : 'muted');
+
+    // Tomorrow plan — built with DOM nodes (no innerHTML)
+    const planEl = document.getElementById('glancePlan');
+    while (planEl.firstChild) planEl.removeChild(planEl.firstChild);
+
+    if (capR && capR.recommended_cap != null) {
+      const cap = capR.recommended_cap;
+      const solar = capR.solar_prediction?.predicted_solar_kwh?.toFixed(0) ?? '?';
+      const cloud = capR.solar_prediction?.cloud_cover_pct?.toFixed(0) ?? '?';
+      const predExp = capR.predicted_export_kwh ?? '?';
+      const predImp = capR.predicted_overnight_grid_import_kwh ?? '?';
+      const reason = capR.reasoning_mode ? capR.reasoning_mode.split(' ')[0].toLowerCase() : '';
+
+      planEl.appendChild(_glanceSpan('Tomorrow', 'strong'));
+      // (use <strong> via document.createElement for proper semantics)
+      const strong = document.createElement('strong');
+      strong.textContent = 'Tomorrow';
+      planEl.removeChild(planEl.lastChild);
+      planEl.appendChild(strong);
+
+      planEl.appendChild(document.createTextNode(`: ${cloud}% cloud · ${solar} kWh predicted `));
+      const a1 = document.createElement('span'); a1.className = 'arrow'; a1.textContent = '→';
+      planEl.appendChild(a1);
+      planEl.appendChild(document.createTextNode(' set cap to '));
+      const capStrong = document.createElement('strong');
+      capStrong.textContent = `${cap}%`;
+      planEl.appendChild(capStrong);
+      planEl.appendChild(document.createTextNode(' '));
+      const a2 = document.createElement('span'); a2.className = 'arrow'; a2.textContent = '·';
+      planEl.appendChild(a2);
+      planEl.appendChild(document.createTextNode(` expected ${predExp} kWh export, ${predImp} kWh overnight import `));
+      const a3 = document.createElement('span'); a3.className = 'arrow'; a3.textContent = '·';
+      planEl.appendChild(a3);
+      const opacity = document.createElement('span');
+      opacity.style.opacity = '0.7';
+      opacity.textContent = ` (${reason})`;
+      planEl.appendChild(opacity);
+    } else {
+      planEl.textContent = 'Tomorrow plan unavailable';
+    }
+  } catch (e) {
+    console.error('refreshGlance:', e);
+  }
+}
+
+refreshGlance();
+setInterval(refreshGlance, 60000);
+</script>
+
+<!-- ================ END Glance Widget ================ -->
+
+
 <!-- Hero Band -->
 <div class="hero-band">
   <div class="hero-left">
