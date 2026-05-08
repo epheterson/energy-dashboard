@@ -487,6 +487,8 @@ def _build_history(days):
             # Estimate savings if shifted to off-peak using actual config rates
             peak_rate = get_rate(datetime.now(), "peak")
             off_peak_rate = get_rate(datetime.now(), "off_peak")
+            if peak_rate <= 0:
+                continue
             potential_savings = peak_cost * (1 - off_peak_rate / peak_rate)
             opportunities.append(
                 {
