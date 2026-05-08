@@ -383,25 +383,37 @@ def recommend_charge_cap():
     }
 
     # Log decision for auto-tuning + audit
+    # UPSERT — update existing entry for this date, dont append duplicates.
+    # recommend_charge_cap() may be called many times per day (every page load,
+    # HA REST sensor poll, etc.) — we want one entry per date, not 100.
     history = _load_history()
-    history.append(
-        {
-            "date": prediction.get("date"),
-            "predicted_solar": predicted_solar,
-            "predicted_daytime_load": daytime_load,
-            "predicted_overnight_load": overnight_load,
-            "cloud_cover": prediction.get("cloud_cover_pct"),
-            "recommended_cap": recommended_cap,
-            "target_cap_pct": round(target_cap_pct * 100, 1),
-            "floor_cap_pct": round(min_cap_pct * 100, 1),
-            "reasoning_mode": reason_summary,
-            "actual_full_hour": None,
-            "actual_solar": None,
-            "actual_export_kwh": None,  # NEW — to be filled by backfill
-            "actual_grid_import_kwh": None,  # NEW
-            "logged_at": datetime.now().isoformat(),
-        }
-    )
+    target_date = prediction.get("date")
+    new_data = {
+        "date": target_date,
+        "predicted_solar": predicted_solar,
+        "predicted_daytime_load": daytime_load,
+        "predicted_overnight_load": overnight_load,
+        "cloud_cover": prediction.get("cloud_cover_pct"),
+        "recommended_cap": recommended_cap,
+        "target_cap_pct": round(target_cap_pct * 100, 1),
+        "floor_cap_pct": round(min_cap_pct * 100, 1),
+        "reasoning_mode": reason_summary,
+        "logged_at": datetime.now().isoformat(),
+    }
+    found = False
+    for i, e in enumerate(history):
+        if e.get("date") == target_date:
+            # Preserve actuals (filled by backfill scheduler), update predictions
+            for k, v in new_data.items():
+                history[i][k] = v
+            found = True
+            break
+    if not found:
+        new_data["actual_full_hour"] = None
+        new_data["actual_solar"] = None
+        new_data["actual_export_kwh"] = None
+        new_data["actual_grid_import_kwh"] = None
+        history.append(new_data)
     _save_history(history)
 
     return result

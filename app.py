@@ -993,65 +993,46 @@ async def api_health():
 
 @app.get("/api/battery/prediction-history")
 async def api_prediction_history():
-    """Historical predictions with actual solar for accuracy tracking."""
+    """Historical predictions with actuals from cap_history (single source of truth)."""
     import json as json_mod
     from pathlib import Path
+    from datetime import date as _date_cls
 
-    log_path = Path(__file__).parent / "data" / "prediction_audit.jsonl"
-    if not log_path.exists():
+    cap_path = Path(__file__).parent / "data" / "cap_history.json"
+    if not cap_path.exists():
         return {"history": []}
 
-    # Read predictions
-    predictions = []
     try:
-        with open(log_path) as f:
-            for line in f:
-                line = line.strip()
-                if line:
-                    predictions.append(json_mod.loads(line))
+        with open(cap_path) as f:
+            entries = json_mod.load(f)
     except Exception:
         return {"history": []}
 
-    # Get actual solar data from Tesla cache if available
-    actual_solar = {}
-    tesla_cache = Path(__file__).parent / "data" / "tesla_energy_30d.json"
-    if tesla_cache.exists():
-        try:
-            with open(tesla_cache) as f:
-                tesla = json_mod.load(f)
-            for date, day_data in tesla.get("daily", {}).items():
-                actual_solar[date] = round(day_data.get("solar", 0), 1)
-        except Exception:
-            pass
-
-    # Build history with actual comparison
+    today_str = _date_cls.today().isoformat()
     history = []
-    seen_dates = set()
-    for p in reversed(predictions):  # most recent first
-        sp = p.get("solar_prediction", {})
-        date = sp.get("date", "")
-        if date in seen_dates:
-            continue  # one entry per date
-        seen_dates.add(date)
-
-        actual = actual_solar.get(date)
-        predicted = sp.get("predicted_solar_kwh", 0)
+    for e in entries:
+        date = e.get("date", "")
+        if not date or date > today_str:
+            continue
+        predicted = e.get("predicted_solar")
+        # Suppress today/future actual_solar — Tesla still aggregating mid-day
+        actual = e.get("actual_solar") if date < today_str else None
         error_pct = None
-        if actual and predicted:
+        if actual is not None and predicted:
             error_pct = round((actual - predicted) / predicted * 100, 0)
+        history.append({
+            "date": date,
+            "predicted_solar": predicted,
+            "actual_solar": actual,
+            "error_pct": error_pct,
+            "cloud_cover": e.get("cloud_cover"),
+            "recommended_cap": e.get("recommended_cap"),
+            "actual_full_hour": e.get("actual_full_hour"),
+        })
 
-        history.append(
-            {
-                "date": date,
-                "predicted_solar": predicted,
-                "actual_solar": actual,
-                "error_pct": error_pct,
-                "cloud_cover": sp.get("cloud_cover_pct"),
-                "recommended_cap": p.get("recommended_cap"),
-            }
-        )
+    history.sort(key=lambda x: x.get("date", ""), reverse=True)
+    return {"history": history[:14]}
 
-    return {"history": history[:14]}  # Last 2 weeks
 
 
 @app.post("/api/battery/record-fill")
