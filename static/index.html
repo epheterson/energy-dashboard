@@ -63,7 +63,7 @@ header {
 
 header h1 {
   font-size: 20px;
-  font-weight: 600;
+  font-weight: var(--fw-bold);
   letter-spacing: -0.3px;
 }
 
@@ -93,8 +93,8 @@ header h1 {
   gap: 6px;
   padding: 4px 12px;
   border-radius: 20px;
-  font-size: 13px;
-  font-weight: 600;
+  font-size: var(--fs-md);
+  font-weight: var(--fw-bold);
   letter-spacing: 0.5px;
 }
 .tou-badge.off-peak { background: rgba(34,197,94,0.15); color: var(--green); }
@@ -134,18 +134,18 @@ header h1 {
 .hero-left { flex: 0 0 auto; min-width: 120px; }
 .hero-cost {
   font-size: 40px;
-  font-weight: 700;
+  font-weight: var(--fw-bold);
   font-family: 'SF Mono', 'Fira Code', monospace;
   font-variant-numeric: tabular-nums;
   letter-spacing: -2px;
 }
-.hero-label { font-size: 12px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+.hero-label { font-size: var(--fs-sm); color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
 .hero-flow { flex: 1; display: flex; align-items: center; justify-content: center; gap: 8px; }
 .flow-node { display: flex; flex-direction: column; align-items: center; min-width: 80px; }
-.flow-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); margin-bottom: 2px; }
-.flow-val { font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -0.5px; }
-.flow-unit { font-size: 11px; color: var(--text-muted); }
-.flow-soc { font-size: 11px; color: var(--text-muted); }
+.flow-label { font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); margin-bottom: 2px; }
+.flow-val { font-size: var(--fs-lg); font-weight: var(--fw-bold); font-variant-numeric: tabular-nums; letter-spacing: -0.5px; }
+.flow-unit { font-size: var(--fs-xs); color: var(--text-muted); }
+.flow-soc { font-size: var(--fs-xs); color: var(--text-muted); }
 .flow-arrow { font-size: 18px; color: var(--text-muted); opacity: 0.5; }
 .flow-node.solar .flow-val { color: var(--solar); }
 .flow-node.battery .flow-val { color: var(--battery-color); }
@@ -154,8 +154,8 @@ header h1 {
 .flow-node.grid.exporting .flow-val { color: var(--green); }
 .hero-right { flex: 0 0 auto; display: flex; flex-direction: column; gap: 6px; min-width: 120px; }
 .hero-metric { display: flex; align-items: baseline; gap: 6px; }
-.hero-metric-val { font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; }
-.hero-metric-unit { font-size: 11px; color: var(--text-muted); }
+.hero-metric-val { font-size: 18px; font-weight: var(--fw-bold); font-variant-numeric: tabular-nums; }
+.hero-metric-unit { font-size: var(--fs-xs); color: var(--text-muted); }
 
 /* Sub-bar */
 .sub-bar {
@@ -168,8 +168,8 @@ header h1 {
 }
 .sub-item { flex: 1; display: flex; flex-direction: column; align-items: center; padding: 10px 12px; border-right: 1px solid var(--border); }
 .sub-item:last-child { border-right: none; }
-.sub-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); margin-bottom: 2px; }
-.sub-val { font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.sub-label { font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); margin-bottom: 2px; }
+.sub-val { font-size: 15px; font-weight: var(--fw-bold); font-variant-numeric: tabular-nums; }
 
 /* Old power-flow cards hidden */
 .power-flow { display: none; }
@@ -206,7 +206,7 @@ header h1 {
 }
 
 .stat-card .label {
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 1px;
@@ -214,12 +214,12 @@ header h1 {
 
 .stat-card .value {
   font-size: 28px;
-  font-weight: 700;
+  font-weight: var(--fw-bold);
   margin-top: 4px;
 }
 
 .stat-card .sub {
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--text-muted);
   margin-top: 2px;
 }
@@ -238,13 +238,13 @@ header h1 {
   display: flex;
   align-items: center;
   gap: 20px;
-  font-size: 13px;
+  font-size: var(--fs-md);
   flex-wrap: wrap;
 }
 
 .ev-bar-summary .ev-label {
-  font-weight: 600;
-  font-size: 11px;
+  font-weight: var(--fw-bold);
+  font-size: var(--fs-xs);
   text-transform: uppercase;
   letter-spacing: 1px;
   color: var(--text-muted);
@@ -258,13 +258,13 @@ header h1 {
 }
 
 .ev-bar-summary .ev-val {
-  font-weight: 700;
-  font-size: 14px;
+  font-weight: var(--fw-bold);
+  font-size: var(--fs-md);
 }
 
 .ev-bar-summary .ev-sub {
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 
 .ev-bar-summary .ev-sep {
@@ -288,8 +288,8 @@ header h1 {
 }
 
 .ev-vehicle-mini .ev-vname {
-  font-weight: 600;
-  font-size: 12px;
+  font-weight: var(--fw-bold);
+  font-size: var(--fs-sm);
   min-width: 40px;
 }
 
@@ -310,13 +310,13 @@ header h1 {
 }
 
 .ev-vehicle-mini .ev-vstatus {
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--text-muted);
 }
 
 .ev-charging-active {
   color: var(--green);
-  font-weight: 600;
+  font-weight: var(--fw-bold);
 }
 
 @media (max-width: 768px) {
@@ -343,8 +343,8 @@ header h1 {
 }
 
 .panel-header h2 {
-  font-size: 14px;
-  font-weight: 600;
+  font-size: var(--fs-md);
+  font-weight: var(--fw-bold);
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
@@ -366,8 +366,8 @@ header h1 {
   padding: 6px 14px;
   border-radius: 6px;
   cursor: pointer;
-  font-size: 13px;
-  font-weight: 500;
+  font-size: var(--fs-md);
+  font-weight: var(--fw-medium);
 }
 
 .period-selector button.active {
@@ -404,19 +404,19 @@ header h1 {
 .opp-body { flex: 1; min-width: 0; }
 
 .opp-title {
-  font-size: 13px;
-  font-weight: 600;
+  font-size: var(--fs-md);
+  font-weight: var(--fw-bold);
 }
 
 .opp-detail {
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--text-muted);
   margin-top: 1px;
 }
 
 .opp-savings {
-  font-size: 14px;
-  font-weight: 700;
+  font-size: var(--fs-md);
+  font-weight: var(--fw-bold);
   color: var(--green);
   white-space: nowrap;
 }
@@ -428,18 +428,18 @@ table {
   border-collapse: collapse;
 }
 
-table.compact td { padding: 6px 10px; font-size: 13px; }
+table.compact td { padding: 6px 10px; font-size: var(--fs-md); }
 table.compact th { padding: 6px 10px; }
 
 th {
   text-align: left;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.5px;
   padding: 8px 12px;
   border-bottom: 1px solid var(--border);
-  font-weight: 500;
+  font-weight: var(--fw-medium);
 }
 
 th.sortable {
@@ -450,7 +450,7 @@ th.sortable {
 th.sortable:hover { color: var(--text); }
 
 .sort-arrow {
-  font-size: 10px;
+  font-size: var(--fs-xs);
   opacity: 0.5;
 }
 
@@ -461,7 +461,7 @@ th.right, td.right { text-align: right; }
 td {
   padding: 10px 12px;
   border-bottom: 1px solid rgba(45,49,64,0.5);
-  font-size: 14px;
+  font-size: var(--fs-md);
 }
 
 tr:last-child td { border-bottom: none; }
@@ -485,7 +485,7 @@ tr:last-child td { border-bottom: none; }
 .source-bar .seg.grid { background: var(--grid-color); }
 
 .source-legend {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--text-muted);
   display: flex;
   align-items: center;
@@ -504,7 +504,7 @@ tr:last-child td { border-bottom: none; }
 
 .mono {
   font-family: 'SF Mono', 'Fira Code', monospace;
-  font-size: 13px;
+  font-size: var(--fs-md);
 }
 
 /* ---- Charts ---- */
@@ -549,7 +549,7 @@ tr:last-child td { border-bottom: none; }
 
 .modal-header h3 {
   font-size: 16px;
-  font-weight: 600;
+  font-weight: var(--fw-bold);
 }
 
 .modal-close {
@@ -582,11 +582,11 @@ tr:last-child td { border-bottom: none; }
 
 .modal-stat .val {
   font-size: 20px;
-  font-weight: 700;
+  font-weight: var(--fw-bold);
 }
 
 .modal-stat .lbl {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.5px;
@@ -605,7 +605,7 @@ tr:last-child td { border-bottom: none; }
 
 .drill-name {
   width: 140px;
-  font-size: 13px;
+  font-size: var(--fs-md);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -629,7 +629,7 @@ tr:last-child td { border-bottom: none; }
 .drill-val {
   width: 100px;
   text-align: right;
-  font-size: 13px;
+  font-size: var(--fs-md);
   font-family: 'SF Mono', 'Fira Code', monospace;
   color: var(--text-muted);
 }
@@ -642,8 +642,8 @@ tr:last-child td { border-bottom: none; }
   gap: 6px;
   padding: 4px 12px;
   border-radius: 20px;
-  font-size: 12px;
-  font-weight: 600;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-bold);
   letter-spacing: 0.3px;
 }
 
@@ -660,7 +660,7 @@ tr:last-child td { border-bottom: none; }
   border-radius: 10px;
   padding: 10px 16px;
   margin-bottom: 16px;
-  font-size: 13px;
+  font-size: var(--fs-md);
   display: none;
   align-items: center;
   gap: 8px;
@@ -670,7 +670,7 @@ tr:last-child td { border-bottom: none; }
 
 .insight-icon { font-size: 16px; flex-shrink: 0; }
 .insight-text { flex: 1; }
-.insight-text strong { font-weight: 600; }
+.insight-text strong { font-weight: var(--fw-bold); }
 
 /* ---- Loading ---- */
 
@@ -678,7 +678,7 @@ tr:last-child td { border-bottom: none; }
   text-align: center;
   padding: 40px 20px;
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: var(--fs-md);
 }
 
 .spinner {
@@ -706,21 +706,21 @@ tr:last-child td { border-bottom: none; }
   .hero-flow { flex-wrap: wrap; gap: 4px; justify-content: flex-start; }
   .flow-node { min-width: 60px; }
   .flow-val { font-size: 18px; }
-  .flow-arrow { font-size: 14px; }
+  .flow-arrow { font-size: var(--fs-md); }
   .hero-right { flex-direction: row; flex-wrap: wrap; gap: 12px; }
   /* Sub-bar: wrap on mobile */
   .sub-bar { flex-wrap: wrap; }
   .sub-item { flex: 0 0 calc(33.3% - 1px); padding: 8px; }
-  .sub-val { font-size: 13px; }
+  .sub-val { font-size: var(--fs-md); }
   .sub-label { font-size: 9px; }
   .state-badge { display: none; }
   .panel-header { padding: 12px 14px; flex-wrap: wrap; gap: 8px; }
-  .panel-header h2 { font-size: 13px; }
+  .panel-header h2 { font-size: var(--fs-md); }
   .panel-body { padding: 14px; }
-  .period-selector button { padding: 5px 10px; font-size: 12px; }
-  table.compact td { padding: 6px 8px; font-size: 12px; }
-  table.compact th { padding: 6px 8px; font-size: 10px; }
-  th { padding: 6px 8px; font-size: 10px; }
+  .period-selector button { padding: 5px 10px; font-size: var(--fs-sm); }
+  table.compact td { padding: 6px 8px; font-size: var(--fs-sm); }
+  table.compact th { padding: 6px 8px; font-size: var(--fs-xs); }
+  th { padding: 6px 8px; font-size: var(--fs-xs); }
   td { padding: 8px; }
   .billing-row { grid-template-columns: 1fr !important; }
   .battery-forecast { min-width: 0; }
@@ -744,7 +744,7 @@ tr:last-child td { border-bottom: none; }
 }
 
 .billing-card .billing-title {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 1px;
@@ -752,14 +752,14 @@ tr:last-child td { border-bottom: none; }
 }
 
 .billing-card .billing-hero {
-  font-size: 22px;
-  font-weight: 700;
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-bold);
   letter-spacing: -0.5px;
   margin-bottom: 2px;
 }
 
 .billing-card .billing-hero-sub {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--text-muted);
   margin-bottom: 6px;
 }
@@ -774,7 +774,7 @@ tr:last-child td { border-bottom: none; }
   display: flex;
   justify-content: space-between;
   align-items: center;
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 
 .billing-line .billing-line-label {
@@ -782,7 +782,7 @@ tr:last-child td { border-bottom: none; }
 }
 
 .billing-line .billing-line-value {
-  font-weight: 600;
+  font-weight: var(--fw-bold);
 }
 
 .billing-line.deferred {
@@ -791,9 +791,9 @@ tr:last-child td { border-bottom: none; }
 }
 
 .billing-line .billing-note {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--text-muted);
-  font-weight: 400;
+  font-weight: var(--fw-normal);
 }
 
 .billing-divider {
@@ -821,7 +821,7 @@ tr:last-child td { border-bottom: none; }
 .trueup-months {
   display: flex;
   justify-content: space-between;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--text-muted);
 }
 
@@ -836,7 +836,7 @@ tr:last-child td { border-bottom: none; }
 }
 
 .battery-forecast .forecast-title {
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 1px;
@@ -850,18 +850,18 @@ tr:last-child td { border-bottom: none; }
 }
 
 .forecast-item .forecast-label {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--text-muted);
   margin-bottom: 2px;
 }
 
 .forecast-item .forecast-value {
   font-size: 18px;
-  font-weight: 700;
+  font-weight: var(--fw-bold);
 }
 
 .forecast-item .forecast-sub {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--text-muted);
   margin-top: 2px;
 }
@@ -870,21 +870,21 @@ tr:last-child td { border-bottom: none; }
   margin-top: 12px;
   padding-top: 12px;
   border-top: 1px solid var(--border);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--text-muted);
   line-height: 1.4;
 }
 
 .forecast-updated {
   margin-top: 8px;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--text-muted);
   opacity: 0.6;
 }
 
 .billing-unavailable, .forecast-unavailable {
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: var(--fs-md);
   text-align: center;
   padding: 20px 0;
 }
@@ -900,7 +900,7 @@ tr:last-child td { border-bottom: none; }
     <span id="touBadge" class="tou-badge off-peak">OFF-PEAK $0.40</span>
     <span id="stateBadge" class="state-badge good">--</span>
   </div>
-  <div style="font-size:13px;color:var(--text-muted)" id="lastUpdate">Connecting...</div>
+  <div style="font-size:var(--fs-md);color:var(--text-muted)" id="lastUpdate">Connecting...</div>
 </header>
 
 
@@ -915,7 +915,7 @@ tr:last-child td { border-bottom: none; }
     padding: 10px 16px;
     background: var(--bg-elevated, #1a1a1a);
     border-radius: 12px 12px 0 0;
-    font-size: 13px; color: var(--text-muted);
+    font-size: var(--fs-md); color: var(--text-muted);
     border-bottom: 1px solid var(--border, rgba(255,255,255,0.06));
   }
   .glance-status .dot {
@@ -937,7 +937,7 @@ tr:last-child td { border-bottom: none; }
   }
   .glance-num { display: flex; flex-direction: column; }
   .glance-val {
-    font-size: 36px; font-weight: 600; line-height: 1.05;
+    font-size: 36px; font-weight: var(--fw-bold); line-height: 1.05;
     font-variant-numeric: tabular-nums;
     letter-spacing: -0.02em;
   }
@@ -945,11 +945,11 @@ tr:last-child td { border-bottom: none; }
   .glance-val.warn    { color: var(--yellow, #f59e0b); }
   .glance-val.muted   { color: var(--text-muted); }
   .glance-unit {
-    font-size: 14px; font-weight: 400; color: var(--text-muted);
+    font-size: var(--fs-md); font-weight: var(--fw-normal); color: var(--text-muted);
     margin-left: 4px;
   }
   .glance-label {
-    font-size: 12px; color: var(--text-muted);
+    font-size: var(--fs-sm); color: var(--text-muted);
     margin-top: 4px; text-transform: uppercase; letter-spacing: 0.04em;
   }
   .glance-plan {
@@ -957,10 +957,10 @@ tr:last-child td { border-bottom: none; }
     margin-top: 8px;
     padding-top: 16px;
     border-top: 1px solid var(--border, rgba(255,255,255,0.06));
-    font-size: 13px; color: var(--text-muted);
+    font-size: var(--fs-md); color: var(--text-muted);
     line-height: 1.5;
   }
-  .glance-plan strong { color: var(--text, #fff); font-weight: 500; }
+  .glance-plan strong { color: var(--text, #fff); font-weight: var(--fw-medium); }
   .glance-plan .arrow { opacity: 0.5; margin: 0 6px; }
 
   @media (max-width: 720px) {
@@ -1166,10 +1166,10 @@ setInterval(refreshGlance, 60000);
 <div class="panel" id="opportunitiesPanel" style="display:none">
   <div class="panel-header" style="cursor:pointer" onclick="toggleOpportunities()">
     <div style="display:flex;align-items:center;gap:8px">
-      <span id="oppChevron" style="font-size:12px;color:var(--text-muted);transition:transform 0.2s">&#9654;</span>
-      <h2 style="font-size:12px">Optimization</h2>
+      <span id="oppChevron" style="font-size:var(--fs-sm);color:var(--text-muted);transition:transform 0.2s">&#9654;</span>
+      <h2 style="font-size:var(--fs-sm)">Optimization</h2>
     </div>
-    <span style="font-size:12px;color:var(--text-muted)" id="oppSummary"></span>
+    <span style="font-size:var(--fs-sm);color:var(--text-muted)" id="oppSummary"></span>
   </div>
   <div class="panel-body" style="padding:12px 20px;display:none" id="opportunitiesList"></div>
 </div>
@@ -1196,7 +1196,7 @@ setInterval(refreshGlance, 60000);
       <div class="billing-divider"></div>
       <div class="billing-line">
         <span class="billing-line-label">Grid Import / Export</span>
-        <span class="billing-line-value"><span id="billingImportKwh">--</span> <span style="color:var(--text-muted);font-weight:400">/</span> <span id="billingExportKwh">--</span></span>
+        <span class="billing-line-value"><span id="billingImportKwh">--</span> <span style="color:var(--text-muted);font-weight:var(--fw-normal)">/</span> <span id="billingExportKwh">--</span></span>
       </div>
       <div class="billing-divider"></div>
       <div class="billing-line">
@@ -1206,10 +1206,10 @@ setInterval(refreshGlance, 60000);
       <div class="billing-divider"></div>
       <div class="billing-line">
         <span class="billing-line-label" style="color:var(--orange)">Gas (PG&E)</span>
-        <span class="billing-line-value"><span id="billingGasCost">--</span> <span style="color:var(--text-muted);font-weight:400" id="billingGasForecast">--</span></span>
+        <span class="billing-line-value"><span id="billingGasCost">--</span> <span style="color:var(--text-muted);font-weight:var(--fw-normal)" id="billingGasForecast">--</span></span>
       </div>
       <div class="billing-divider"></div>
-      <div class="billing-line" style="font-weight:600">
+      <div class="billing-line" style="font-weight:var(--fw-bold)">
         <span class="billing-line-label">Total Bill Estimate</span>
         <span class="billing-line-value" id="billingTotalWithGas">--</span>
       </div>
@@ -1248,7 +1248,7 @@ setInterval(refreshGlance, 60000);
   <div class="panel-header">
     <h2>Energy Flow</h2>
     <div style="display:flex;align-items:center;gap:12px">
-      <div id="energyFlowSummary" style="font-size:11px;color:var(--text-muted);font-variant-numeric:tabular-nums"></div>
+      <div id="energyFlowSummary" style="font-size:var(--fs-xs);color:var(--text-muted);font-variant-numeric:tabular-nums"></div>
       <div class="period-selector" id="energyFlowDays">
         <button onclick="loadEnergyFlows(1, this)">1d</button>
         <button class="active" onclick="loadEnergyFlows(7, this)">7d</button>
@@ -1282,21 +1282,21 @@ setInterval(refreshGlance, 60000);
       <div class="forecast-value" id="forecastCapStatus">--</div>
     </div>
   </div>
-  <div class="forecast-reasoning" id="forecastReasoning" style="font-size:12px;color:var(--text-muted);line-height:1.6;font-variant-numeric:tabular-nums;font-family:ui-monospace,SFMono-Regular,Menlo,monospace"></div>
+  <div class="forecast-reasoning" id="forecastReasoning" style="font-size:var(--fs-sm);color:var(--text-muted);line-height:1.6;font-variant-numeric:tabular-nums;font-family:ui-monospace,SFMono-Regular,Menlo,monospace"></div>
   <div class="forecast-updated" id="forecastUpdated"></div>
   <div class="forecast-history" id="forecastHistory" style="display:none; margin-top:12px; border-top:1px solid var(--border); padding-top:12px;">
     <div style="display:flex;justify-content:space-between;align-items:center;cursor:pointer" onclick="toggleForecastHistory()">
-      <span style="font-size:11px;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-muted)">Prediction Accuracy</span>
-      <span id="forecastHistoryChevron" style="font-size:10px;color:var(--text-muted);transition:transform 0.2s">&#9654;</span>
+      <span style="font-size:var(--fs-xs);text-transform:uppercase;letter-spacing:0.5px;color:var(--text-muted)">Prediction Accuracy</span>
+      <span id="forecastHistoryChevron" style="font-size:var(--fs-xs);color:var(--text-muted);transition:transform 0.2s">&#9654;</span>
     </div>
     <div id="forecastHistoryBody" style="display:none;margin-top:8px;">
-      <table style="width:100%;font-size:12px;">
+      <table style="width:100%;font-size:var(--fs-sm);">
         <thead><tr style="color:var(--text-muted)">
-          <th style="text-align:left;font-weight:500;padding:4px 0">Date</th>
-          <th style="text-align:right;font-weight:500">Predicted</th>
-          <th style="text-align:right;font-weight:500">Actual</th>
-          <th style="text-align:right;font-weight:500">Cap</th>
-          <th style="text-align:right;font-weight:500">Exported</th>
+          <th style="text-align:left;font-weight:var(--fw-medium);padding:4px 0">Date</th>
+          <th style="text-align:right;font-weight:var(--fw-medium)">Predicted</th>
+          <th style="text-align:right;font-weight:var(--fw-medium)">Actual</th>
+          <th style="text-align:right;font-weight:var(--fw-medium)">Cap</th>
+          <th style="text-align:right;font-weight:var(--fw-medium)">Exported</th>
         </tr></thead>
         <tbody id="forecastHistoryRows"></tbody>
       </table>
@@ -1311,7 +1311,7 @@ setInterval(refreshGlance, 60000);
     <div style="display:flex;align-items:center;gap:8px">
       <div class="source-col" style="display:flex;align-items:center;gap:8px">
         <div class="source-bar" id="headerSourceBar" style="width:100px"></div>
-        <span class="source-legend" id="headerSourceLabel" style="white-space:nowrap;font-size:11px;color:var(--text-muted)"></span>
+        <span class="source-legend" id="headerSourceLabel" style="white-space:nowrap;font-size:var(--fs-xs);color:var(--text-muted)"></span>
       </div>
     </div>
   </div>
@@ -1406,14 +1406,14 @@ setInterval(refreshGlance, 60000);
 <div class="panel">
   <div class="panel-header">
     <h2 id="histCircuitTitle">Circuit Breakdown</h2>
-    <div id="histSummary" style="font-size:13px;color:var(--text-muted)"></div>
+    <div id="histSummary" style="font-size:var(--fs-md);color:var(--text-muted)"></div>
   </div>
   <div class="panel-body" style="padding:0">
     <table id="histCircuitTableWrap">
       <thead>
         <tr>
           <th class="sortable" data-sort="name" onclick="sortHistCircuits('name')">Circuit <span class="sort-arrow"></span></th>
-          <th style="width:120px;text-align:center;color:var(--text-muted);font-weight:500">Trend</th>
+          <th style="width:120px;text-align:center;color:var(--text-muted);font-weight:var(--fw-medium)">Trend</th>
           <th class="right sortable" data-sort="kwh" onclick="sortHistCircuits('kwh')">kWh <span class="sort-arrow"></span></th>
           <th class="right sortable active" data-sort="cost" onclick="sortHistCircuits('cost')" id="histCostHeader">Cost <span class="sort-arrow">▼</span></th>
           <th class="right sortable" data-sort="daily_cost" onclick="sortHistCircuits('daily_cost')">$/day <span class="sort-arrow"></span></th>
@@ -2138,12 +2138,12 @@ function drawEnergyFlowSankey(d) {
   if (!container || !d || !d.links || !d.links.length) return;
   // Need d3 + d3-sankey loaded
   if (typeof d3 === 'undefined' || typeof d3.sankey === 'undefined') {
-    container.innerHTML = '<div style="color:var(--text-muted);font-size:12px;padding:20px">Loading flow chart…</div>';
+    container.innerHTML = '<div style="color:var(--text-muted);font-size:var(--fs-sm);padding:20px">Loading flow chart…</div>';
     return;
   }
   container.innerHTML = '';
   const width = Math.max(container.clientWidth, 720);
-  const height = 280;
+  const height = 300;
 
   const svg = d3.select(container).append('svg')
     .attr('width', width)
@@ -2151,10 +2151,10 @@ function drawEnergyFlowSankey(d) {
 
   const sankey = d3.sankey()
     .nodeWidth(16)
-    .nodePadding(20)
-    .nodeAlign(d3.sankeyLeft)
+    .nodePadding(24)
+    .nodeAlign(d3.sankeyJustify)
     .iterations(128)
-    .extent([[1, 10], [width - 1, height - 10]]);
+    .extent([[80, 10], [width - 80, height - 10]]);
 
   const nodeColors = {
     'Solar': 'var(--solar)',
@@ -2584,7 +2584,7 @@ function sortHistCircuits(key) {
 }
 
 function renderCircuitSparkline(daily) {
-  if (!daily || daily.length < 2) return '<span style="color:var(--text-muted);font-size:11px">—</span>';
+  if (!daily || daily.length < 2) return '<span style="color:var(--text-muted);font-size:var(--fs-xs)">—</span>';
   const w = 100, h = 22, pad = 2;
   const max = Math.max(...daily, 0.001);
   const n = daily.length;
@@ -2629,11 +2629,11 @@ function renderHistCircuitTable() {
     // Show total peak % with battery coverage indicator
     const batteryCovered = c.grid_peak_pct !== undefined && c.peak_pct > 1 && c.grid_peak_pct < 1;
     const peakLabel = batteryCovered
-      ? `${c.peak_pct.toFixed(0)}% <span style="color:var(--battery-color);font-size:11px" title="Battery covers peak">⚡</span>`
+      ? `${c.peak_pct.toFixed(0)}% <span style="color:var(--battery-color);font-size:var(--fs-xs)" title="Battery covers peak">⚡</span>`
       : `${c.peak_pct.toFixed(0)}%`;
     const spark = renderCircuitSparkline(c.daily_kwh);
     const anomalyBadge = c.anomaly
-      ? `<span title="Today: ${c.anomaly.today_kwh} kWh vs ${c.anomaly.prior_avg_kwh} avg" style="display:inline-block;margin-left:6px;padding:1px 6px;border-radius:8px;background:rgba(239,68,68,0.18);color:var(--red);font-size:10px;font-weight:600;font-variant-numeric:tabular-nums">${c.anomaly.ratio}x</span>`
+      ? `<span title="Today: ${c.anomaly.today_kwh} kWh vs ${c.anomaly.prior_avg_kwh} avg" style="display:inline-block;margin-left:6px;padding:1px 6px;border-radius:8px;background:rgba(239,68,68,0.18);color:var(--red);font-size:var(--fs-xs);font-weight:var(--fw-bold);font-variant-numeric:tabular-nums">${c.anomaly.ratio}x</span>`
       : '';
     return `<tr>
       <td>${c.name}${anomalyBadge}</td>
@@ -3076,7 +3076,7 @@ async function loadForecastHistory() {
       tbody.innerHTML += `<tr>
         <td style="padding:4px 0">${h.date?.slice(5) || '--'}</td>
         <td style="text-align:right;color:var(--solar)">${h.predicted_solar?.toFixed(1) || '--'}</td>
-        <td style="text-align:right">${actual} <span style="font-size:10px;color:${errColor}">${errText}</span></td>
+        <td style="text-align:right">${actual} <span style="font-size:var(--fs-xs);color:${errColor}">${errText}</span></td>
         <td style="text-align:right;color:var(--green)">${h.recommended_cap || '--'}%</td>
         <td style="text-align:right">${(() => {
           const ex = h.actual_export_kwh;
