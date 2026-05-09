@@ -727,7 +727,7 @@ tr:last-child td { border-bottom: none; }
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 12px;
-  padding: 14px 16px;
+  padding: 12px 14px;
 }
 
 .billing-card .billing-title {
@@ -739,7 +739,7 @@ tr:last-child td { border-bottom: none; }
 }
 
 .billing-card .billing-hero {
-  font-size: 26px;
+  font-size: 22px;
   font-weight: 700;
   letter-spacing: -0.5px;
   margin-bottom: 2px;
@@ -748,7 +748,7 @@ tr:last-child td { border-bottom: none; }
 .billing-card .billing-hero-sub {
   font-size: 11px;
   color: var(--text-muted);
-  margin-bottom: 10px;
+  margin-bottom: 6px;
 }
 
 .billing-breakdown {
@@ -1180,15 +1180,10 @@ setInterval(refreshGlance, 60000);
         <span class="billing-line-label">NEM Charges <span class="billing-note">(deferred)</span></span>
         <span class="billing-line-value" id="billingNem">--</span>
       </div>
-      <div style="font-size:11px;color:var(--text-muted);margin-top:2px" id="billingNemNote">accumulating for Jan true-up</div>
       <div class="billing-divider"></div>
       <div class="billing-line">
-        <span class="billing-line-label">Grid Import</span>
-        <span class="billing-line-value" id="billingImportKwh">--</span>
-      </div>
-      <div class="billing-line">
-        <span class="billing-line-label">Grid Export</span>
-        <span class="billing-line-value" id="billingExportKwh">--</span>
+        <span class="billing-line-label">Grid Import / Export</span>
+        <span class="billing-line-value"><span id="billingImportKwh">--</span> <span style="color:var(--text-muted);font-weight:400">/</span> <span id="billingExportKwh">--</span></span>
       </div>
       <div class="billing-divider"></div>
       <div class="billing-line">
@@ -1198,11 +1193,7 @@ setInterval(refreshGlance, 60000);
       <div class="billing-divider"></div>
       <div class="billing-line">
         <span class="billing-line-label" style="color:var(--orange)">Gas (PG&E)</span>
-        <span class="billing-line-value" id="billingGasCost">--</span>
-      </div>
-      <div class="billing-line">
-        <span class="billing-line-label" style="font-size:12px;color:var(--text-muted)">Gas forecast</span>
-        <span class="billing-line-value" style="font-size:13px" id="billingGasForecast">--</span>
+        <span class="billing-line-value"><span id="billingGasCost">--</span> <span style="color:var(--text-muted);font-weight:400" id="billingGasForecast">--</span></span>
       </div>
       <div class="billing-divider"></div>
       <div class="billing-line" style="font-weight:600">
