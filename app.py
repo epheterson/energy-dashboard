@@ -790,6 +790,68 @@ async def api_solar(days: int = 7):
     return data
 
 
+@app.get("/api/energy-flows")
+async def api_energy_flows(days: int = 7):
+    """Aggregated energy flows for sankey: Solar/Grid -> Home/Battery/Export."""
+    if not is_solar_enabled():
+        return {"error": "Solar not configured"}
+    days = min(max(days, 1), 90)
+    data = await fetch_solar(days)
+    if not data or data.get("error"):
+        return {"error": "Could not fetch solar data"}
+
+    solar = float(data.get("solar_kwh", 0) or 0)
+    grid_import = float(data.get("grid_import_kwh", 0) or 0)
+    grid_export = float(data.get("grid_export_kwh", 0) or 0)
+    bat_charge = float(data.get("battery_charge_kwh", 0) or 0)
+    bat_discharge = float(data.get("battery_discharge_kwh", 0) or 0)
+
+    # Accounting (NEM 2 / self-power assumptions):
+    #   - Battery charges from solar surplus (clamped to available solar)
+    #   - Grid export comes from remaining solar surplus (after battery)
+    #   - What's left of solar covers home directly
+    #   - Battery discharge covers home
+    #   - Grid import covers remaining home load
+    # Numbers won't always balance perfectly because of round-trip
+    # efficiency loss + HA sensor granularity — that's normal.
+    solar_to_battery = min(bat_charge, solar)
+    solar_to_export = min(grid_export, max(0.0, solar - solar_to_battery))
+    solar_to_home = max(0.0, solar - solar_to_battery - solar_to_export)
+    battery_to_home = bat_discharge
+    grid_to_home = grid_import
+
+    nodes = ["Solar", "Grid Import", "Battery", "Home", "Grid Export"]
+    raw_links = [
+        ("Solar", "Home", solar_to_home),
+        ("Solar", "Battery", solar_to_battery),
+        ("Solar", "Grid Export", solar_to_export),
+        ("Battery", "Home", battery_to_home),
+        ("Grid Import", "Home", grid_to_home),
+    ]
+    links = [
+        {"source": s, "target": t, "value": round(v, 2)}
+        for s, t, v in raw_links if v > 0.05
+    ]
+
+    home_total = solar_to_home + battery_to_home + grid_to_home
+    return {
+        "days": days,
+        "nodes": nodes,
+        "links": links,
+        "totals": {
+            "solar_kwh": round(solar, 2),
+            "grid_import_kwh": round(grid_import, 2),
+            "grid_export_kwh": round(grid_export, 2),
+            "battery_charge_kwh": round(bat_charge, 2),
+            "battery_discharge_kwh": round(bat_discharge, 2),
+            "home_consumption_kwh": round(home_total, 2),
+            "self_sufficiency_pct": round(
+                100.0 * (solar_to_home + battery_to_home) / max(0.001, home_total), 1
+            ),
+        },
+    }
+
+
 @app.get("/api/ev")
 async def api_ev():
     """Live EV charging status for all vehicles."""

@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Energy Dashboard</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<script src="https://unpkg.com/d3@7/dist/d3.min.js"></script>
+<script src="https://unpkg.com/d3-sankey@0.12.3/dist/d3-sankey.min.js"></script>
 <style>
 :root {
   --bg: #0f1117;
@@ -1230,6 +1232,24 @@ setInterval(refreshGlance, 60000);
   </div>
 </div>
 
+<!-- Energy Flow (Sankey) -->
+<div class="panel" id="energyFlowPanel" data-solar>
+  <div class="panel-header">
+    <h2>Energy Flow</h2>
+    <div style="display:flex;align-items:center;gap:12px">
+      <div id="energyFlowSummary" style="font-size:11px;color:var(--text-muted);font-variant-numeric:tabular-nums"></div>
+      <div class="period-selector" id="energyFlowDays">
+        <button onclick="loadEnergyFlows(1, this)">1d</button>
+        <button class="active" onclick="loadEnergyFlows(7, this)">7d</button>
+        <button onclick="loadEnergyFlows(30, this)">30d</button>
+      </div>
+    </div>
+  </div>
+  <div class="panel-body" style="padding:14px 20px">
+    <div id="sankey-chart" style="width:100%;min-height:260px;overflow-x:auto"></div>
+  </div>
+</div>
+
 <!-- Battery Forecast -->
 <div class="battery-forecast" id="batteryForecastCard" data-solar style="display:none">
   <div class="forecast-title">Tomorrow's Forecast</div>
@@ -2072,6 +2092,161 @@ document.getElementById('drilldownModal').addEventListener('click', (e) => {
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') closeDrilldown();
 });
+
+
+// ==========================================
+// REST — Energy Flows (Sankey)
+// ==========================================
+window._energyFlowDays = 7;
+
+async function loadEnergyFlows(days, btn) {
+  if (btn) {
+    btn.closest('.period-selector').querySelectorAll('button').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+  }
+  window._energyFlowDays = days;
+  try {
+    const r = await fetch('/api/energy-flows?days=' + days);
+    const d = await r.json();
+    if (d.error) {
+      document.getElementById('energyFlowPanel').style.display = 'none';
+      return;
+    }
+    const t = d.totals || {};
+    document.getElementById('energyFlowSummary').textContent =
+      `${t.self_sufficiency_pct ?? '--'}% self-sufficient · ${t.home_consumption_kwh ?? '--'} kWh home · ${t.grid_export_kwh ?? '--'} kWh exported`;
+    drawEnergyFlowSankey(d);
+  } catch (e) {
+    console.warn('energy flows error', e);
+  }
+}
+
+function drawEnergyFlowSankey(d) {
+  const container = document.getElementById('sankey-chart');
+  if (!container || !d || !d.links || !d.links.length) return;
+  // Need d3 + d3-sankey loaded
+  if (typeof d3 === 'undefined' || typeof d3.sankey === 'undefined') {
+    container.innerHTML = '<div style="color:var(--text-muted);font-size:12px;padding:20px">Loading flow chart…</div>';
+    return;
+  }
+  container.innerHTML = '';
+  const width = Math.max(container.clientWidth, 720);
+  const height = 280;
+
+  const svg = d3.select(container).append('svg')
+    .attr('width', width)
+    .attr('height', height);
+
+  const sankey = d3.sankey()
+    .nodeWidth(16)
+    .nodePadding(20)
+    .nodeAlign(d3.sankeyLeft)
+    .iterations(128)
+    .extent([[1, 10], [width - 1, height - 10]]);
+
+  const nodeColors = {
+    'Solar': 'var(--solar)',
+    'Grid Import': 'var(--red)',
+    'Battery': 'var(--green)',
+    'Home': '#6366f1',
+    'Grid Export': '#5eead4',
+  };
+  const linkColors = {
+    'Solar': 'rgba(250,204,21,0.55)',
+    'Grid Import': 'rgba(239,68,68,0.55)',
+    'Battery': 'rgba(34,197,94,0.55)',
+  };
+  const FALLBACK_NODE = '#71717a';
+  const FALLBACK_LINK = 'rgba(139,148,163,0.45)';
+
+  // Resolve CSS vars to actual colors so SVG paints them
+  function resolveVar(c) {
+    if (!c || !c.startsWith('var(')) return c;
+    const name = c.slice(4, -1).trim();
+    return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || FALLBACK_NODE;
+  }
+
+  const nodeNames = d.nodes;
+  const idxByName = Object.fromEntries(nodeNames.map((n, i) => [n, i]));
+  const graph = sankey({
+    nodes: nodeNames.map(n => ({ name: n })),
+    links: d.links.map(l => ({
+      source: typeof l.source === 'string' ? idxByName[l.source] : l.source,
+      target: typeof l.target === 'string' ? idxByName[l.target] : l.target,
+      value: l.value,
+    })),
+  });
+
+  // Links
+  svg.append('g').selectAll('path')
+    .data(graph.links)
+    .join('path')
+    .attr('d', d3.sankeyLinkHorizontal())
+    .attr('stroke', l => resolveVar(linkColors[l.source.name] || FALLBACK_LINK))
+    .attr('stroke-width', l => Math.max(1, l.width))
+    .attr('fill', 'none')
+    .attr('opacity', 0.55)
+    .append('title')
+    .text(l => `${l.source.name} → ${l.target.name}: ${l.value.toFixed(1)} kWh`);
+
+  // Nodes
+  svg.append('g').selectAll('rect')
+    .data(graph.nodes)
+    .join('rect')
+    .attr('x', n => n.x0)
+    .attr('y', n => n.y0)
+    .attr('height', n => Math.max(2, n.y1 - n.y0))
+    .attr('width', sankey.nodeWidth())
+    .attr('fill', n => resolveVar(nodeColors[n.name] || FALLBACK_NODE))
+    .attr('rx', 2)
+    .append('title')
+    .text(n => `${n.name}: ${n.value.toFixed(1)} kWh`);
+
+  // Labels — outside-the-rect, side based on column position
+  svg.append('g').selectAll('text')
+    .data(graph.nodes)
+    .join('text')
+    .attr('x', n => n.x0 < width / 2 ? n.x1 + 6 : n.x0 - 6)
+    .attr('y', n => (n.y0 + n.y1) / 2)
+    .attr('dy', '0.35em')
+    .attr('text-anchor', n => n.x0 < width / 2 ? 'start' : 'end')
+    .attr('fill', '#cbd5e1')
+    .style('font-size', '11px')
+    .style('font-family', 'ui-monospace,SFMono-Regular,Menlo,monospace')
+    .style('font-variant-numeric', 'tabular-nums')
+    .text(n => `${n.name} · ${n.value.toFixed(0)} kWh`);
+}
+
+// Initial load + reload on window resize
+loadEnergyFlows(window._energyFlowDays);
+window.addEventListener('resize', () => {
+  if (window._energyFlowLastData) drawEnergyFlowSankey(window._energyFlowLastData);
+});
+
+// Cache last loaded payload so resize re-renders cleanly
+const _origLoadEnergyFlows = loadEnergyFlows;
+loadEnergyFlows = async function(days, btn) {
+  if (btn) {
+    btn.closest('.period-selector').querySelectorAll('button').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+  }
+  window._energyFlowDays = days;
+  try {
+    const r = await fetch('/api/energy-flows?days=' + days);
+    const d = await r.json();
+    if (d.error) {
+      document.getElementById('energyFlowPanel').style.display = 'none';
+      return;
+    }
+    window._energyFlowLastData = d;
+    const t = d.totals || {};
+    document.getElementById('energyFlowSummary').textContent =
+      `${t.self_sufficiency_pct ?? '--'}% self-sufficient · ${t.home_consumption_kwh ?? '--'} kWh home · ${t.grid_export_kwh ?? '--'} kWh exported`;
+    drawEnergyFlowSankey(d);
+  } catch (e) {
+    console.warn('energy flows error', e);
+  }
+};
 
 // ==========================================
 // REST — Historical
