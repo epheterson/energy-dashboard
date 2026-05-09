@@ -194,6 +194,21 @@ For "will my next PG&E bill be exactly $X?" → directional indicator only, not 
 | Solar shows 0 always | HA token expired or `solar.ha_entities` IDs wrong — check HA Developer Tools |
 | Email never arrives | use SMTP App Password not regular; enable 2FA on Gmail |
 
+## Tests
+
+Lightweight smoke tests cover config (TOU classification, rate lookups), solar load prediction, and endpoint registration:
+
+```bash
+# In the running container:
+docker exec energy-dashboard sh -c 'pip install pytest && pytest -v'
+
+# Or locally:
+pip install -r requirements-dashboard.txt -r requirements-dev.txt
+pytest
+```
+
+These are smoke tests, not full integration coverage — they run without needing eGauge or Home Assistant access.
+
 ## Updating
 
 Source is COPY'd into the Docker image at build time:

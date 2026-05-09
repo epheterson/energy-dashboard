@@ -23,12 +23,23 @@
   --solar: #facc15;
   --grid-color: #ef4444;
   --battery-color: #22c55e;
+
+  /* Type system — 1 sans + 1 mono, 3 weights, 4 sizes */
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  --fs-xs: 11px;   /* labels, sublines */
+  --fs-sm: 12px;   /* body data */
+  --fs-md: 14px;   /* default body */
+  --fs-lg: 22px;   /* hero numbers */
+  --fw-normal: 400;
+  --fw-medium: 500;
+  --fw-bold: 700;
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif;
+  font-family: var(--font-sans);
   background: var(--bg);
   color: var(--text);
   line-height: 1.5;
