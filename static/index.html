@@ -1402,6 +1402,7 @@ setInterval(refreshGlance, 60000);
       <thead>
         <tr>
           <th class="sortable" data-sort="name" onclick="sortHistCircuits('name')">Circuit <span class="sort-arrow"></span></th>
+          <th style="width:120px;text-align:center;color:var(--text-muted);font-weight:500">Trend</th>
           <th class="right sortable" data-sort="kwh" onclick="sortHistCircuits('kwh')">kWh <span class="sort-arrow"></span></th>
           <th class="right sortable active" data-sort="cost" onclick="sortHistCircuits('cost')" id="histCostHeader">Cost <span class="sort-arrow">▼</span></th>
           <th class="right sortable" data-sort="daily_cost" onclick="sortHistCircuits('daily_cost')">$/day <span class="sort-arrow"></span></th>
@@ -2293,7 +2294,7 @@ async function loadHistory(days, btn) {
     '<div class="panel-loading" id="histLoading"><span class="spinner"></span>Loading ' + days + ' days of data...</div>' +
     '<div class="chart-container"><canvas id="historyChart"></canvas></div>';
   document.getElementById('histCircuitTable').innerHTML =
-    '<tr><td colspan="5" class="panel-loading"><span class="spinner"></span>Loading...</td></tr>';
+    '<tr><td colspan="6" class="panel-loading"><span class="spinner"></span>Loading...</td></tr>';
 
   try {
     // Fetch history (+ solar in parallel when enabled)
@@ -2533,6 +2534,8 @@ function updateHistCircuits(d) {
       avg_daily_cost: displayDailyCost,
       peak_pct: peakPct,
       grid_peak_pct: gridPeakPct,
+      daily_kwh: c.daily_kwh || [],
+      anomaly: c.anomaly || null,
     };
   });
 
@@ -2569,6 +2572,29 @@ function sortHistCircuits(key) {
   renderHistCircuitTable();
 }
 
+function renderCircuitSparkline(daily) {
+  if (!daily || daily.length < 2) return '<span style="color:var(--text-muted);font-size:11px">—</span>';
+  const w = 100, h = 22, pad = 2;
+  const max = Math.max(...daily, 0.001);
+  const n = daily.length;
+  const xStep = n > 1 ? (w - pad * 2) / (n - 1) : 0;
+  const points = daily.map((v, i) => {
+    const x = pad + i * xStep;
+    const y = h - pad - (v / max) * (h - pad * 2);
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(' ');
+  // Highlight last point with a circle if it's the max OR an anomaly
+  const lastV = daily[n - 1];
+  const lastX = pad + (n - 1) * xStep;
+  const lastY = h - pad - (lastV / max) * (h - pad * 2);
+  const isMax = lastV === max && lastV > 0;
+  const dotColor = isMax ? 'var(--yellow)' : 'var(--text-muted)';
+  return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" style="display:block">
+    <polyline fill="none" stroke="rgba(139,148,163,0.6)" stroke-width="1.2" points="${points}"/>
+    <circle cx="${lastX.toFixed(1)}" cy="${lastY.toFixed(1)}" r="2" fill="${dotColor}"/>
+  </svg>`;
+}
+
 function renderHistCircuitTable() {
   const circuits = [...histCircuitData];
   circuits.sort((a, b) => {
@@ -2594,8 +2620,13 @@ function renderHistCircuitTable() {
     const peakLabel = batteryCovered
       ? `${c.peak_pct.toFixed(0)}% <span style="color:var(--battery-color);font-size:11px" title="Battery covers peak">⚡</span>`
       : `${c.peak_pct.toFixed(0)}%`;
+    const spark = renderCircuitSparkline(c.daily_kwh);
+    const anomalyBadge = c.anomaly
+      ? `<span title="Today: ${c.anomaly.today_kwh} kWh vs ${c.anomaly.prior_avg_kwh} avg" style="display:inline-block;margin-left:6px;padding:1px 6px;border-radius:8px;background:rgba(239,68,68,0.18);color:var(--red);font-size:10px;font-weight:600;font-variant-numeric:tabular-nums">${c.anomaly.ratio}x</span>`
+      : '';
     return `<tr>
-      <td>${c.name}</td>
+      <td>${c.name}${anomalyBadge}</td>
+      <td style="padding:6px 8px">${spark}</td>
       <td class="right mono">${fmtWh(c.total_kwh)}</td>
       <td class="right mono">$${c.total_cost.toFixed(2)}</td>
       <td class="right mono">$${c.avg_daily_cost.toFixed(2)}</td>

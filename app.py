@@ -441,12 +441,31 @@ def _build_history(days):
         print(f"Error building history: {e}")
         return None
 
+    # Date range for sparkline alignment (oldest -> newest)
+    sorted_dates = sorted({d["date"] for d in daily_totals})
+
     # Convert to JSON-serializable format
     circuits = []
     for reg_name, stats in sorted(
         register_stats.items(), key=lambda x: x[1]["total_cost"], reverse=True
     ):
         name = reg_name.replace(" [kWh]", "")
+        by_day = stats.get("by_day", {}) or {}
+        # by_day keys are datetime.date objects; sorted_dates are strings
+        by_day_str = {(k.isoformat() if hasattr(k, "isoformat") else str(k)): v for k, v in by_day.items()}
+        daily_kwh = [round(by_day_str.get(dt, 0.0), 3) for dt in sorted_dates]
+        # Anomaly: today's kWh > 2x mean of prior days (and >= 0.5 kWh to ignore noise)
+        anomaly = None
+        if len(daily_kwh) >= 3:
+            today_v = daily_kwh[-1]
+            prior = daily_kwh[:-1]
+            prior_mean = sum(prior) / len(prior) if prior else 0
+            if today_v >= 0.5 and prior_mean > 0 and today_v > 2.0 * prior_mean:
+                anomaly = {
+                    "today_kwh": today_v,
+                    "prior_avg_kwh": round(prior_mean, 2),
+                    "ratio": round(today_v / prior_mean, 1),
+                }
         circuits.append(
             {
                 "name": name,
@@ -454,6 +473,8 @@ def _build_history(days):
                 "total_cost": round(stats["total_cost"], 2),
                 "avg_daily_kwh": round(stats["avg_daily_kwh"], 2),
                 "avg_daily_cost": round(stats["avg_daily_cost"], 2),
+                "daily_kwh": daily_kwh,
+                "anomaly": anomaly,
                 "by_tou": {
                     period: {
                         "kwh": round(d["kwh"], 2),
