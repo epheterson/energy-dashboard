@@ -1394,6 +1394,103 @@ async def background_today_refresh():
 @app.on_event("startup")
 async def startup():
     asyncio.create_task(background_today_refresh())
+    asyncio.create_task(background_daily_backfill())
+
+
+# ==========================================
+# Background: daily backfill of yesterday's actual export/import
+# ==========================================
+async def _backfill_one(date_str: str) -> bool:
+    """Fill in actual_export_kwh + actual_grid_import_kwh for a single date.
+    Returns True if values were written, False if data unavailable."""
+    try:
+        from solar_integration import is_solar_enabled, build_hourly_solar_data
+        from solar_forecast import _load_history, _save_history
+        if not is_solar_enabled():
+            return False
+        history = _load_history()
+        # Need at least one entry for this date to update
+        target = next((e for e in history if e.get("date") == date_str), None)
+        if not target:
+            return False
+        # Skip if already filled
+        if target.get("actual_export_kwh") is not None and target.get("actual_grid_import_kwh") is not None:
+            return False
+        # Pull 14-day window so we cover any older missing dates too
+        from datetime import datetime as _dt, date as _date
+        try:
+            d_obj = _dt.strptime(date_str, "%Y-%m-%d").date()
+            age_days = max(1, (_date.today() - d_obj).days + 1)
+        except Exception:
+            age_days = 7
+        loop = asyncio.get_event_loop()
+        solar_hourly = await loop.run_in_executor(
+            None, build_hourly_solar_data, min(30, age_days)
+        )
+        if not solar_hourly:
+            return False
+        export = 0.0
+        imp = 0.0
+        solar = 0.0
+        for (d, h), data in solar_hourly.items():
+            if d != date_str:
+                continue
+            export += data.get("grid_export_kwh", 0) or 0
+            imp += data.get("grid_import_kwh", 0) or 0
+            solar += data.get("solar_kwh", 0) or 0
+        if export == 0 and imp == 0 and solar == 0:
+            return False
+        target["actual_export_kwh"] = round(export, 2)
+        target["actual_grid_import_kwh"] = round(imp, 2)
+        if target.get("actual_solar") is None and solar > 0:
+            target["actual_solar"] = round(solar, 2)
+        _save_history(history)
+        print(f"[backfill] {date_str}: export={export:.2f} import={imp:.2f} solar={solar:.2f}")
+        return True
+    except Exception as e:
+        print(f"[backfill] error for {date_str}: {e}")
+        return False
+
+
+async def background_daily_backfill():
+    """Backfill yesterday + any missing recent days. Runs at startup and daily at 03:00."""
+    # Initial catch-up: any of last 14 days that are missing actuals
+    await asyncio.sleep(20)  # let app warm up + HA settle
+    try:
+        from solar_forecast import _load_history
+        from datetime import date as _date, timedelta as _td
+        history = _load_history()
+        today_str = str(_date.today())
+        # Backfill any past entry without actuals (skip today — not done yet)
+        candidates = [
+            e.get("date") for e in history
+            if e.get("date") and e.get("date") < today_str
+            and (e.get("actual_export_kwh") is None or e.get("actual_grid_import_kwh") is None)
+        ]
+        # Limit to last 14 distinct dates
+        candidates = sorted(set(candidates), reverse=True)[:14]
+        for d in candidates:
+            await _backfill_one(d)
+            await asyncio.sleep(1)
+    except Exception as e:
+        print(f"[backfill] startup catch-up error: {e}")
+
+    # Daily loop: sleep until 03:00 local, then backfill yesterday
+    while True:
+        try:
+            from datetime import datetime as _dt, timedelta as _td, date as _date
+            now = _dt.now()
+            target = now.replace(hour=3, minute=0, second=0, microsecond=0)
+            if target <= now:
+                target = target + _td(days=1)
+            sleep_s = (target - now).total_seconds()
+            print(f"[backfill] next run in {sleep_s/3600:.1f}h ({target})")
+            await asyncio.sleep(sleep_s)
+            yesterday = str((_date.today() - _td(days=1)))
+            await _backfill_one(yesterday)
+        except Exception as e:
+            print(f"[backfill] daily loop error: {e}")
+            await asyncio.sleep(3600)  # back off on error
 
 
 # ==========================================
