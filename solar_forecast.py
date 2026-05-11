@@ -92,6 +92,46 @@ def fetch_tomorrow_cloud_cover():
     return sum(daytime_covers) / len(daytime_covers)
 
 
+def _observed_peak_solar(month):
+    """Back-calculate clear-sky peak production from recent sunny-day actuals.
+
+    For each recent day with both actual_solar and cloud_cover, invert the
+    cloud-factor formula to derive what clear-sky peak would explain it:
+        implied_peak = actual_solar / (1 - cloud_pct/100 * 0.85)
+
+    Uses the target month plus adjacent months (similar sun angle). Returns
+    median of qualifying days, or None if fewer than 5 usable samples.
+    """
+    target_months = {month, (month - 2) % 12 + 1, month % 12 + 1}
+    history = _load_history()
+    implied = []
+    for h in history[-45:]:
+        actual = h.get("actual_solar")
+        cloud = h.get("cloud_cover")
+        if actual is None or cloud is None:
+            continue
+        try:
+            d_month = datetime.strptime(h["date"], "%Y-%m-%d").month
+        except Exception:
+            continue
+        if d_month not in target_months:
+            continue
+        cloud = float(cloud)
+        actual = float(actual)
+        # Skip noisy samples: heavy clouds, rain, or trivial production
+        if cloud > 50 or actual < 5 or h.get("precip_mm", 0) > 0.5:
+            continue
+        cloud_factor = 1 - (cloud / 100 * 0.85)
+        if cloud_factor < 0.3:
+            continue
+        implied.append(actual / cloud_factor)
+
+    if len(implied) < 5:
+        return None
+    implied.sort()
+    return round(implied[len(implied) // 2], 1)
+
+
 def predict_solar_production(cloud_cover_pct=None):
     """Predict tomorrow's solar production in kWh.
 
@@ -106,7 +146,14 @@ def predict_solar_production(cloud_cover_pct=None):
 
     tomorrow = datetime.now() + timedelta(days=1)
     month = tomorrow.month
-    peak_solar = MONTHLY_PEAK_SOLAR.get(month, 25.0)
+
+    # Prefer observed peak from recent history; fall back to seasonal table.
+    # The static table consistently under-predicts in spring/summer (observed
+    # +26-49% error in May 2026), so observed-when-available > hardcoded.
+    observed_peak = _observed_peak_solar(month)
+    table_peak = MONTHLY_PEAK_SOLAR.get(month, 25.0)
+    peak_solar = observed_peak if observed_peak is not None else table_peak
+    peak_source = "observed" if observed_peak is not None else "table"
 
     if cloud_cover_pct is not None:
         # Cloud cover reduces solar production
@@ -124,6 +171,8 @@ def predict_solar_production(cloud_cover_pct=None):
         "date": tomorrow.strftime("%Y-%m-%d"),
         "month": month,
         "peak_solar_kwh": round(peak_solar, 1),
+        "peak_source": peak_source,
+        "table_peak_kwh": round(table_peak, 1),
         "cloud_cover_pct": round(cloud_cover_pct, 0),
         "predicted_solar_kwh": round(predicted_kwh, 1),
         "forecast_available": forecast_available,
@@ -234,7 +283,13 @@ def predict_loads(lookback_days=14, sunrise_hour=6, sunset_hour=19):
 
     db = Path(__file__).parent / "data" / "egauge_history.db"
     if not db.exists():
-        return {"daytime_kwh": 25.0, "overnight_kwh": 15.0, "overnight_base_kwh": 10.0, "overnight_ev_kwh": 5.0, "source": "fallback_defaults"}
+        return {
+            "daytime_kwh": 25.0,
+            "overnight_kwh": 15.0,
+            "overnight_base_kwh": 10.0,
+            "overnight_ev_kwh": 5.0,
+            "source": "fallback_defaults",
+        }
 
     cutoff_ts = int((datetime.now() - timedelta(days=lookback_days)).timestamp())
     conn = sqlite3.connect(str(db))
@@ -248,7 +303,13 @@ def predict_loads(lookback_days=14, sunrise_hour=6, sunset_hour=19):
     conn.close()
 
     if not rows:
-        return {"daytime_kwh": 25.0, "overnight_kwh": 15.0, "overnight_base_kwh": 10.0, "overnight_ev_kwh": 5.0, "source": "no_history"}
+        return {
+            "daytime_kwh": 25.0,
+            "overnight_kwh": 15.0,
+            "overnight_base_kwh": 10.0,
+            "overnight_ev_kwh": 5.0,
+            "source": "no_history",
+        }
 
     by_hour_total = {h: [] for h in range(24)}
     by_hour_ev = {h: [] for h in range(24)}
@@ -260,9 +321,12 @@ def predict_loads(lookback_days=14, sunrise_hour=6, sunset_hour=19):
         total = registers.get("Usage [kWh]")
         if total is None or total == 0:
             total = sum(
-                v for k, v in registers.items()
-                if isinstance(v, (int, float)) and v > 0
-                and "Generation" not in k and "Total Power" not in k
+                v
+                for k, v in registers.items()
+                if isinstance(v, (int, float))
+                and v > 0
+                and "Generation" not in k
+                and "Total Power" not in k
             )
         ev = registers.get("EV Charger [kWh]", 0)
         # eGauge sometimes stores EV as negative (consumption convention varies)
@@ -271,12 +335,17 @@ def predict_loads(lookback_days=14, sunrise_hour=6, sunset_hour=19):
             by_hour_total[hour].append(total)
             by_hour_ev[hour].append(ev)
 
-    avg_total = {h: (sum(v)/len(v)) if v else 0.0 for h, v in by_hour_total.items()}
-    avg_ev = {h: (sum(v)/len(v)) if v else 0.0 for h, v in by_hour_ev.items()}
+    avg_total = {h: (sum(v) / len(v)) if v else 0.0 for h, v in by_hour_total.items()}
+    avg_ev = {h: (sum(v) / len(v)) if v else 0.0 for h, v in by_hour_ev.items()}
 
     daytime_kwh = sum(avg_total[h] for h in range(sunrise_hour, sunset_hour))
-    overnight_total = sum(avg_total[h] for h in list(range(sunset_hour, 24)) + list(range(0, sunrise_hour)))
-    overnight_ev = sum(avg_ev[h] for h in list(range(sunset_hour, 24)) + list(range(0, sunrise_hour)))
+    overnight_total = sum(
+        avg_total[h]
+        for h in list(range(sunset_hour, 24)) + list(range(0, sunrise_hour))
+    )
+    overnight_ev = sum(
+        avg_ev[h] for h in list(range(sunset_hour, 24)) + list(range(0, sunrise_hour))
+    )
     overnight_base = max(0, overnight_total - overnight_ev)
 
     return {
@@ -333,7 +402,9 @@ def recommend_charge_cap():
     # Floor cap: battery must have enough for overnight + safety
     # Floor uses BASE overnight load only — EV charging draws from grid directly,
     # not from Powerwall (default Tesla behavior).
-    min_cap_pct = (overnight_base_load / efficiency) / BATTERY_CAPACITY_KWH + safety_margin
+    min_cap_pct = (
+        overnight_base_load / efficiency
+    ) / BATTERY_CAPACITY_KWH + safety_margin
 
     chosen_cap_pct = max(min_cap_pct, target_cap_pct)
     chosen_cap_pct = min(1.0, max(0.05, chosen_cap_pct))
@@ -419,8 +490,13 @@ def recommend_charge_cap():
     return result
 
 
-
-def record_actual_fill(date, full_hour, actual_solar_kwh=None, actual_export_kwh=None, actual_grid_import_kwh=None):
+def record_actual_fill(
+    date,
+    full_hour,
+    actual_solar_kwh=None,
+    actual_export_kwh=None,
+    actual_grid_import_kwh=None,
+):
     """Record when battery actually hit 100% for auto-tuning feedback.
 
     Called by the energy dashboard with Tesla SOC data to close the loop.

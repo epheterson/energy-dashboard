@@ -313,8 +313,10 @@ async def fetch_egauge_today(target_date=None):
     battery_kwh_by_hour = {}  # {hour_int: kWh discharged from battery}
     try:
         from solar_integration import is_solar_enabled, build_hourly_solar_data
+
         if is_solar_enabled():
             from datetime import date as _date_cls, datetime as _dt
+
             try:
                 target_d = _dt.strptime(target_date_str, "%Y-%m-%d").date()
                 age_days = max(1, (_date_cls.today() - target_d).days + 1)
@@ -339,6 +341,7 @@ async def fetch_egauge_today(target_date=None):
     # battery_avoided_cost = battery_kwh × tou_rate (what would have been paid at retail)
     # get_rate already imported at module level
     from datetime import datetime as _dt2
+
     try:
         target_d_obj = _dt2.strptime(target_date_str, "%Y-%m-%d").date()
     except Exception:
@@ -356,7 +359,6 @@ async def fetch_egauge_today(target_date=None):
             h["battery_avoided_cost"] = round(bkwh * rate, 3)
         except Exception:
             h["battery_avoided_cost"] = 0
-
 
     circuit_totals = defaultdict(lambda: {"kwh": 0, "cost": 0, "watts": 0})
     total_cost = 0
@@ -452,7 +454,10 @@ def _build_history(days):
         name = reg_name.replace(" [kWh]", "")
         by_day = stats.get("by_day", {}) or {}
         # by_day keys are datetime.date objects; sorted_dates are strings
-        by_day_str = {(k.isoformat() if hasattr(k, "isoformat") else str(k)): v for k, v in by_day.items()}
+        by_day_str = {
+            (k.isoformat() if hasattr(k, "isoformat") else str(k)): v
+            for k, v in by_day.items()
+        }
         daily_kwh = [round(by_day_str.get(dt, 0.0), 3) for dt in sorted_dates]
         # Anomaly: today's kWh > 2x mean of prior days (and >= 0.5 kWh to ignore noise)
         anomaly = None
@@ -541,6 +546,7 @@ def _build_history(days):
     # covered part of consumption (already paid for or free), not full retail.
     try:
         from solar_integration import is_solar_enabled, build_hourly_solar_data
+
         if is_solar_enabled():
             solar_hourly = build_hourly_solar_data(days=days)
             if solar_hourly:
@@ -548,6 +554,7 @@ def _build_history(days):
                 # Also accumulate per-day battery_kwh + battery_avoided_cost (battery × hourly tou_rate)
                 # imports already present at module level
                 from datetime import datetime as _dt_h
+
                 day_share = {}
                 day_battery_kwh = {}
                 day_battery_avoided = {}
@@ -570,7 +577,9 @@ def _build_history(days):
                             day_battery_avoided[date_str] += batt * rate
                         except Exception:
                             pass
-                day_grid_share = {d: (g / max(0.001, total)) for d, (g, total) in day_share.items()}
+                day_grid_share = {
+                    d: (g / max(0.001, total)) for d, (g, total) in day_share.items()
+                }
 
                 # Apply to daily entries
                 for d in daily:
@@ -581,7 +590,9 @@ def _build_history(days):
                         d["off_peak_cost"] = round(d.get("off_peak_cost", 0) * gs, 2)
                         d["part_peak_cost"] = round(d.get("part_peak_cost", 0) * gs, 2)
                     d["battery_kwh"] = round(day_battery_kwh.get(d.get("date"), 0), 2)
-                    d["battery_avoided_cost"] = round(day_battery_avoided.get(d.get("date"), 0), 2)
+                    d["battery_avoided_cost"] = round(
+                        day_battery_avoided.get(d.get("date"), 0), 2
+                    )
 
                 # Apply to circuit totals (use simple average grid_share over window)
                 if day_grid_share:
@@ -608,25 +619,32 @@ def _build_history(days):
     }
 
 
-async def fetch_solar(days=7):
+async def fetch_solar(days=7, today_only=False):
     """Fetch solar blending data — wraps solar_integration.py."""
     if not is_solar_enabled():
         return None
 
-    cache_key = f"solar_{days}"
-    cached = cache.get(cache_key, ttl_seconds=3600)
+    cache_key = f"solar_{days}_today" if today_only else f"solar_{days}"
+    # Today data refreshes more often (partial day, updates every hour)
+    ttl = 300 if today_only else 3600
+    cached = cache.get(cache_key, ttl_seconds=ttl)
     if cached:
         return cached
 
     loop = asyncio.get_event_loop()
-    result = await loop.run_in_executor(None, _build_solar, days)
+    result = await loop.run_in_executor(None, _build_solar, days, today_only)
     if result:
         cache.set(cache_key, result)
     return result
 
 
-def _build_solar(days):
-    """Synchronous solar builder."""
+def _build_solar(days, today_only=False):
+    """Synchronous solar builder.
+
+    today_only=True restricts aggregation to the current calendar date
+    (midnight → now in local time). Used by the glance card so labels
+    saying "today" actually reflect today's data, not a rolling 24h window.
+    """
     from egauge_weekly_analysis import (
         fetch_egauge_data,
         parse_csv_data,
@@ -634,13 +652,24 @@ def _build_solar(days):
     )
     from solar_integration import build_hourly_solar_data, blend_egauge_with_solar
 
+    # When restricting to today, still fetch ≥2 days so calculate_hourly_consumption
+    # has the prior cumulative reading needed to diff today's first hour correctly.
+    fetch_days = max(days, 2) if today_only else days
+
     try:
-        csv_data = fetch_egauge_data(days)
+        csv_data = fetch_egauge_data(fetch_days)
         parsed = parse_csv_data(csv_data)
         hourly = calculate_hourly_consumption(parsed)
-        solar_data = build_hourly_solar_data(days)
+        solar_data = build_hourly_solar_data(fetch_days)
         if not solar_data:
             return None
+
+        if today_only:
+            today = datetime.now().date()
+            hourly = [h for h in hourly if h["date"] == today]
+            today_str = str(today)
+            solar_data = {k: v for k, v in solar_data.items() if k[0] == today_str}
+
         blended, system = blend_egauge_with_solar(hourly, solar_data)
     except Exception as e:
         print(f"Error building solar data: {e}")
@@ -800,12 +829,16 @@ async def api_history(days: int = 7):
 
 
 @app.get("/api/solar")
-async def api_solar(days: int = 7):
-    """Solar blending report."""
+async def api_solar(days: int = 7, today: bool = False):
+    """Solar blending report.
+
+    today=true restricts aggregates to the current calendar date (midnight → now),
+    so glance-card "today" labels reflect actual today, not a rolling 24h window.
+    """
     if not is_solar_enabled():
         return {"error": "Solar not configured"}
     days = min(days, 90)
-    data = await fetch_solar(days)
+    data = await fetch_solar(days, today_only=today)
     if not data:
         return {"error": "Could not fetch solar data"}
     return data
@@ -851,7 +884,8 @@ async def api_energy_flows(days: int = 7):
     ]
     links = [
         {"source": s, "target": t, "value": round(v, 2)}
-        for s, t, v in raw_links if v > 0.05
+        for s, t, v in raw_links
+        if v > 0.05
     ]
 
     home_total = solar_to_home + battery_to_home + grid_to_home
@@ -1135,12 +1169,12 @@ async def api_prediction_log():
     return {"status": "logged", "prediction": prediction}
 
 
-
 @app.get("/api/health")
 async def api_health():
     """Tier-by-tier health check for first-run validation."""
     import os
     from pathlib import Path
+
     tiers = {"dashboard": "ok"}
 
     egauge_url = os.environ.get("EGAUGE_URL", "")
@@ -1158,19 +1192,27 @@ async def api_health():
     else:
         try:
             import urllib.request
-            req = urllib.request.Request(f"{ha_url}/api/", headers={"Authorization": f"Bearer {ha_token}"})
+
+            req = urllib.request.Request(
+                f"{ha_url}/api/", headers={"Authorization": f"Bearer {ha_token}"}
+            )
             with urllib.request.urlopen(req, timeout=5) as resp:
-                tiers["home_assistant"] = "ok" if resp.status == 200 else f"http_{resp.status}"
+                tiers["home_assistant"] = (
+                    "ok" if resp.status == 200 else f"http_{resp.status}"
+                )
         except Exception as e:
             tiers["home_assistant"] = f"unreachable: {str(e)[:60]}"
 
     try:
         from tesla_energy import _get_tesla_config
+
         site_id, token = _get_tesla_config()
         if not site_id:
             tiers["tesla"] = "not_configured"
         elif not token:
-            tiers["tesla"] = "site_id set but token missing — check HA Tesla Fleet integration"
+            tiers["tesla"] = (
+                "site_id set but token missing — check HA Tesla Fleet integration"
+            )
         else:
             tiers["tesla"] = "ok"
     except Exception as e:
@@ -1182,6 +1224,7 @@ async def api_health():
     else:
         try:
             import json as _j
+
             cap = _j.load(open(cap_path))
             tiers["forecast"] = f"ok ({len(cap)} days of history)"
         except Exception as e:
@@ -1189,6 +1232,7 @@ async def api_health():
 
     overall = "ok" if all(v.startswith("ok") for v in tiers.values()) else "degraded"
     return {"status": overall, "tiers": tiers}
+
 
 @app.get("/api/battery/prediction-history")
 async def api_prediction_history():
@@ -1219,21 +1263,22 @@ async def api_prediction_history():
         error_pct = None
         if actual is not None and predicted:
             error_pct = round((actual - predicted) / predicted * 100, 0)
-        history.append({
-            "date": date,
-            "predicted_solar": predicted,
-            "actual_solar": actual,
-            "error_pct": error_pct,
-            "cloud_cover": e.get("cloud_cover"),
-            "recommended_cap": e.get("recommended_cap"),
-            "actual_full_hour": e.get("actual_full_hour"),
-            "actual_export_kwh": e.get("actual_export_kwh"),
-            "actual_grid_import_kwh": e.get("actual_grid_import_kwh"),
-        })
+        history.append(
+            {
+                "date": date,
+                "predicted_solar": predicted,
+                "actual_solar": actual,
+                "error_pct": error_pct,
+                "cloud_cover": e.get("cloud_cover"),
+                "recommended_cap": e.get("recommended_cap"),
+                "actual_full_hour": e.get("actual_full_hour"),
+                "actual_export_kwh": e.get("actual_export_kwh"),
+                "actual_grid_import_kwh": e.get("actual_grid_import_kwh"),
+            }
+        )
 
     history.sort(key=lambda x: x.get("date", ""), reverse=True)
     return {"history": history[:14]}
-
 
 
 @app.post("/api/battery/record-fill")
@@ -1406,6 +1451,7 @@ async def _backfill_one(date_str: str) -> bool:
     try:
         from solar_integration import is_solar_enabled, build_hourly_solar_data
         from solar_forecast import _load_history, _save_history
+
         if not is_solar_enabled():
             return False
         history = _load_history()
@@ -1414,10 +1460,14 @@ async def _backfill_one(date_str: str) -> bool:
         if not target:
             return False
         # Skip if already filled
-        if target.get("actual_export_kwh") is not None and target.get("actual_grid_import_kwh") is not None:
+        if (
+            target.get("actual_export_kwh") is not None
+            and target.get("actual_grid_import_kwh") is not None
+        ):
             return False
         # Pull 14-day window so we cover any older missing dates too
         from datetime import datetime as _dt, date as _date
+
         try:
             d_obj = _dt.strptime(date_str, "%Y-%m-%d").date()
             age_days = max(1, (_date.today() - d_obj).days + 1)
@@ -1445,7 +1495,9 @@ async def _backfill_one(date_str: str) -> bool:
         if target.get("actual_solar") is None and solar > 0:
             target["actual_solar"] = round(solar, 2)
         _save_history(history)
-        print(f"[backfill] {date_str}: export={export:.2f} import={imp:.2f} solar={solar:.2f}")
+        print(
+            f"[backfill] {date_str}: export={export:.2f} import={imp:.2f} solar={solar:.2f}"
+        )
         return True
     except Exception as e:
         print(f"[backfill] error for {date_str}: {e}")
@@ -1459,13 +1511,19 @@ async def background_daily_backfill():
     try:
         from solar_forecast import _load_history
         from datetime import date as _date, timedelta as _td
+
         history = _load_history()
         today_str = str(_date.today())
         # Backfill any past entry without actuals (skip today — not done yet)
         candidates = [
-            e.get("date") for e in history
-            if e.get("date") and e.get("date") < today_str
-            and (e.get("actual_export_kwh") is None or e.get("actual_grid_import_kwh") is None)
+            e.get("date")
+            for e in history
+            if e.get("date")
+            and e.get("date") < today_str
+            and (
+                e.get("actual_export_kwh") is None
+                or e.get("actual_grid_import_kwh") is None
+            )
         ]
         # Limit to last 14 distinct dates
         candidates = sorted(set(candidates), reverse=True)[:14]
@@ -1479,6 +1537,7 @@ async def background_daily_backfill():
     while True:
         try:
             from datetime import datetime as _dt, timedelta as _td, date as _date
+
             now = _dt.now()
             target = now.replace(hour=3, minute=0, second=0, microsecond=0)
             if target <= now:

@@ -1005,7 +1005,7 @@ async function refreshGlance() {
   try {
     const [todayR, solarR, capR, capHistR] = await Promise.all([
       fetch('/api/today').then(r => r.ok ? r.json() : null),
-      fetch('/api/solar?days=1').then(r => r.ok ? r.json() : null),
+      fetch('/api/solar?today=true').then(r => r.ok ? r.json() : null),
       fetch('/api/battery/recommended-cap').then(r => r.ok ? r.json() : null),
       fetch('/api/battery/prediction-history').then(r => r.ok ? r.json() : null),
     ]);
@@ -1025,10 +1025,11 @@ async function refreshGlance() {
       selfSuffPct = Math.max(0, Math.min(100, Math.round(((consumptionKwh - gridImportKwh) / consumptionKwh) * 100)));
     }
 
-    // Status
+    // Status — compare today's grid import vs today's consumption (same window)
+    const todayConsumption = solarR?.consumption_kwh ?? totalKwh;
     let dotClass = 'dot';
     let headline = '✓ Self-sufficient today';
-    if (gridImportKwh > totalKwh * 0.4) { dotClass = 'dot bad'; headline = 'Heavy grid import today'; }
+    if (gridImportKwh > todayConsumption * 0.4) { dotClass = 'dot bad'; headline = 'Heavy grid import today'; }
     else if (gridImportKwh > 1) { dotClass = 'dot warn'; headline = 'Some grid import today'; }
 
     document.getElementById('glanceDot').className = dotClass;
