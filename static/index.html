@@ -1176,10 +1176,33 @@ async function refreshSummary() {
       const selfSuff = consumption > 0 ? Math.max(0, Math.min(100, Math.round(((consumption - imp) / consumption) * 100))) : 0;
       document.getElementById('todaySelfSuff').textContent = selfSuff + '%';
 
-      // Status
+      // Status — be specific about *what kind* of import. Overnight off-peak
+      // imports are normal (cheap rates, charging battery); peak imports are
+      // the alarming kind. The pill should reflect that distinction rather
+      // than treating all kWh equal.
+      const peakImp = (byTou.peak || {}).grid_import || 0;
+      const partImp = (byTou.part_peak || {}).grid_import || 0;
+      const offImp  = (byTou.off_peak || {}).grid_import || 0;
+      const peakCost = (byTou.peak || {}).grid_cost || 0;
+      const partCost = (byTou.part_peak || {}).grid_cost || 0;
       let statusClass = 'good', statusText = 'on track';
-      if (imp > consumption * 0.4) { statusClass = 'bad'; statusText = 'heavy grid import'; }
-      else if (imp > consumption * 0.15) { statusClass = 'warn'; statusText = 'some grid import'; }
+      if (peakImp > 1) {
+        statusClass = 'bad';
+        statusText = `peak grid import · $${peakCost.toFixed(2)}`;
+      } else if (partImp > 1) {
+        statusClass = 'warn';
+        statusText = `part-peak grid import · $${partCost.toFixed(2)}`;
+      } else if (offImp > consumption * 0.5) {
+        // Lots of off-peak imports — almost always overnight grid-charging the battery
+        statusClass = 'good';
+        statusText = `mostly overnight imports`;
+      } else if (offImp > 1) {
+        statusClass = 'good';
+        statusText = `off-peak imports only`;
+      } else if (exp > 0.5) {
+        statusClass = 'good';
+        statusText = `net exporter`;
+      }
       const statusEl = document.getElementById('todayStatus');
       statusEl.className = 'status ' + statusClass;
       document.getElementById('todayStatusText').textContent = statusText;
@@ -2075,26 +2098,104 @@ function updateInsight(d, mix) {
   const bar = document.getElementById('insightBar');
   const icon = document.getElementById('insightIcon');
   const text = document.getElementById('insightText');
+  // Render plain DOM (no innerHTML \u2014 prior version was an XSS surface for any
+  // future template variable that touched user-controlled state, and the
+  // <strong>-via-string pattern is awkward anyway).
+  while (text.firstChild) text.removeChild(text.firstChild);
 
-  let msg = null;
-  if (mix.battery >= 99 && mix.grid < 1 && mix.solar < 1) {
-    msg = { ico: '\u26A1', txt: '<strong>100% battery powered</strong> right now. Zero grid cost.' };
-  } else if (mix.solar > 50) {
-    const pct = Math.round(mix.solar + mix.battery);
-    msg = { ico: '\u2600\uFE0F', txt: `<strong>${pct}% renewable</strong> right now. Solar + battery covering most of your load.` };
-  } else if (mix.grid > 80 && d.tou_period === 'peak') {
-    msg = { ico: '\u26A0', txt: `<strong>Heavy grid draw during peak</strong> ($${d.tou_rate.toFixed(2)}/kWh). Defer large loads if possible.` };
-  } else if (d.battery_soc < 15) {
-    msg = { ico: '\uD83D\uDD0B', txt: `<strong>Battery low (${d.battery_soc.toFixed(0)}%)</strong>. Running on grid until solar recharges.` };
-  }
+  const solar = d.solar_w || 0;
+  const battery = d.battery_w || 0;          // + discharging, \u2212 charging
+  const grid = d.grid_w || 0;                // + importing, \u2212 exporting
+  const home = d.home_w || 0;
+  const soc = d.battery_soc || 0;
+  const period = d.tou_period;
+  const rate = d.tou_rate || 0;
+  const exportCredit = (d.export_credits || {})[period] || 0.12;
+  const periodLabel = (period || 'off_peak').replace('_', '-');
 
-  if (msg) {
-    icon.textContent = msg.ico;
-    text.innerHTML = msg.txt;
-    bar.classList.add('show');
+  // Pick the most useful single narrative for the current state.
+  // Priority: anything *expensive* or *unusual* first, then ideal-state confirmation.
+  let ico, parts;
+
+  if (grid > 500 && period === 'peak') {
+    // Importing during peak rates \u2014 urgent
+    ico = '\u26A0\uFE0F'; // \u26A0\uFE0F
+    parts = [
+      { strong: `Grid import during peak` },
+      { txt: ` \u00B7 ${(grid/1000).toFixed(1)} kW at $${rate.toFixed(2)}/kWh. Defer large loads if you can.` },
+    ];
+  } else if (grid > 500 && period === 'part_peak') {
+    ico = '\u26A1'; // \u26A1
+    parts = [
+      { strong: `Grid import during part-peak` },
+      { txt: ` \u00B7 ${(grid/1000).toFixed(1)} kW at $${rate.toFixed(2)}/kWh.` },
+    ];
+  } else if (grid < -500) {
+    // Exporting \u2014 surface the rate so the lost opportunity is visible
+    ico = '\u2197\uFE0F'; // \u2197
+    parts = [
+      { strong: `Exporting ${Math.abs(grid/1000).toFixed(1)} kW to grid` },
+      { txt: ` \u00B7 credited at $${exportCredit.toFixed(2)}/kWh (${periodLabel}). Battery already full.` },
+    ];
+  } else if (grid > 200 && period === 'off_peak' && battery < -200) {
+    // Off-peak grid charging \u2014 expected overnight behavior, narrate it
+    ico = '\uD83D\uDD0C'; // \uD83D\uDD0C
+    parts = [
+      { strong: `Charging battery from off-peak grid` },
+      { txt: ` \u00B7 ${(grid/1000).toFixed(1)} kW in at $${rate.toFixed(2)}/kWh, SOC ${soc.toFixed(0)}%.` },
+    ];
+  } else if (solar > 200 && battery < -200 && Math.abs(grid) < 200) {
+    // Solar charging battery \u2014 ideal daytime state
+    ico = '\u2600\uFE0F'; // \u2600\uFE0F
+    parts = [
+      { strong: `Solar charging battery` },
+      { txt: ` \u00B7 ${(solar/1000).toFixed(1)} kW in, SOC ${soc.toFixed(0)}% \u2192 99% target.` },
+    ];
+  } else if (solar > home + 100 && Math.abs(grid) < 200 && Math.abs(battery) < 200) {
+    // Solar covering home, battery full, no grid movement \u2014 rare but ideal
+    ico = '\u2600\uFE0F';
+    parts = [
+      { strong: `Self-powered` },
+      { txt: ` \u00B7 solar covering ${(home/1000).toFixed(1)} kW home, battery full, no grid.` },
+    ];
+  } else if (battery > 200 && solar < 100) {
+    // Battery powering everything (overnight)
+    const hoursLeft = soc > 20 ? ((soc - 20) / 100 * 40.5) / Math.max(0.5, battery/1000) : 0;
+    ico = '\uD83D\uDD0B'; // \uD83D\uDD0B
+    parts = [
+      { strong: `Battery powered` },
+      { txt: ` \u00B7 ${(battery/1000).toFixed(1)} kW out, SOC ${soc.toFixed(0)}%` + (hoursLeft > 0 ? `, ~${hoursLeft.toFixed(1)} hrs to reserve.` : '.') },
+    ];
+  } else if (soc < 20) {
+    // Battery at reserve, no help available
+    ico = '\uD83E\uDEAB'; // \uD83E\uDEAB
+    parts = [
+      { strong: `Battery at reserve (${soc.toFixed(0)}%)` },
+      { txt: ` \u00B7 ${grid > 0 ? `grid covering load at $${rate.toFixed(2)}/kWh` : 'solar will recharge'}.` },
+    ];
+  } else if (Math.abs(grid) < 100 && Math.abs(battery) < 100 && Math.abs(solar) < 100) {
+    // Truly idle
+    ico = '\u23FB'; // \u23FB
+    parts = [
+      { strong: `Quiet` },
+      { txt: ` \u00B7 ${(home/1000).toFixed(2)} kW home draw, mostly self-powered.` },
+    ];
   } else {
+    // Don't surface anything noisy
     bar.classList.remove('show');
+    return;
   }
+
+  icon.textContent = ico;
+  for (const p of parts) {
+    if (p.strong) {
+      const s = document.createElement('strong');
+      s.textContent = p.strong;
+      text.appendChild(s);
+    }
+    if (p.txt) text.appendChild(document.createTextNode(p.txt));
+  }
+  bar.classList.add('show');
 }
 
 // Circuit sorting state
