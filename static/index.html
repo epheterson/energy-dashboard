@@ -2131,11 +2131,14 @@ function updateInsight(d, mix) {
       { txt: ` \u00B7 ${(grid/1000).toFixed(1)} kW at $${rate.toFixed(2)}/kWh.` },
     ];
   } else if (grid < -500) {
-    // Exporting \u2014 surface the rate so the lost opportunity is visible
-    ico = '\u2197\uFE0F'; // \u2197
+    // Exporting. Don't quote a specific $/kWh \u2014 the configured rate in
+    // config.yml ($0.12-0.16) is likely above what PG&E actually pays under
+    // NEM 2/3 after non-bypassable charges and true-up, so showing it makes
+    // the dashboard sound more optimistic than it is.
+    ico = '';
     parts = [
       { strong: `Exporting ${Math.abs(grid/1000).toFixed(1)} kW to grid` },
-      { txt: ` \u00B7 credited at $${exportCredit.toFixed(2)}/kWh (${periodLabel}). Battery already full.` },
+      { txt: ` \u00B7 battery already full at ${soc.toFixed(0)}%, surplus going back.` },
     ];
   } else if (grid > 200 && period === 'off_peak' && battery < -200) {
     // Off-peak grid charging \u2014 expected overnight behavior, narrate it
