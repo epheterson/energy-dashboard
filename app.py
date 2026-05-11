@@ -705,19 +705,38 @@ def _build_solar(days, today_only=False):
             }
         )
 
-    # Hourly source breakdown for charts
+    # Hourly source breakdown for charts.
+    # Include per-hour cost/credit so the UI can drill into "where today's net
+    # cost came from" without having to know the TOU rate table.
+    from solar_integration import get_export_credit
+
     hourly_source = []
     for key in sorted(solar_data.keys()):
         date_str, hour = key
         h = solar_data[key]
+        try:
+            dt_for_rate = datetime.strptime(date_str, "%Y-%m-%d").replace(hour=hour)
+            tou_period = get_tou_period(hour)
+            rate = get_rate(dt_for_rate, tou_period)
+            credit = get_export_credit(dt_for_rate, tou_period)
+        except Exception:
+            tou_period = "off_peak"
+            rate = 0.0
+            credit = 0.0
+        gi = h.get("grid_import_kwh", 0)
+        ge = h.get("grid_export_kwh", 0)
         hourly_source.append(
             {
                 "date": date_str,
                 "hour": hour,
+                "tou_period": tou_period,
                 "solar_kwh": round(h.get("solar_kwh", 0), 3),
-                "grid_import_kwh": round(h.get("grid_import_kwh", 0), 3),
+                "grid_import_kwh": round(gi, 3),
+                "grid_export_kwh": round(ge, 3),
                 "battery_discharge_kwh": round(h.get("battery_discharge_kwh", 0), 3),
                 "battery_charge_kwh": round(h.get("battery_charge_kwh", 0), 3),
+                "grid_cost": round(gi * rate, 3),
+                "export_credit": round(ge * credit, 3),
             }
         )
 
