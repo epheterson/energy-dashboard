@@ -903,6 +903,271 @@ tr:last-child td { border-bottom: none; }
   <div style="font-size:var(--fs-md);color:var(--text-muted)" id="lastUpdate">Connecting...</div>
 </header>
 
+<!-- Hero Band — live power flow, always at top -->
+<div class="hero-band" style="justify-content:center;padding:14px 20px;display:flex;align-items:center;margin-bottom:16px">
+  <div class="hero-flow" data-solar>
+    <div class="flow-node solar"><span class="flow-label">Solar</span><span class="flow-val" id="solarW">--</span><span class="flow-unit">W</span></div>
+    <span class="flow-arrow">→</span>
+    <div class="flow-node battery" id="batteryCard"><span class="flow-label">Battery</span><span class="flow-val" id="batteryW">--</span><span class="flow-unit">W</span><div class="soc-bar" style="margin-top:4px"><div class="fill" id="socFill" style="width:0%"></div></div><span class="flow-soc"><span id="socPct">--</span>%</span></div>
+    <span class="flow-arrow">→</span>
+    <div class="flow-node home"><span class="flow-label">Home</span><span class="flow-val" id="homeW">--</span><span class="flow-unit">W</span></div>
+    <span class="flow-arrow">→</span>
+    <div class="flow-node grid" id="gridCard"><span class="flow-label">Grid</span><span class="flow-val" id="gridW">--</span><span class="flow-unit">W</span><span class="flow-soc" id="gridDir">--</span></div>
+  </div>
+</div>
+
+<!-- ================ Summary cards: TODAY + TOMORROW ================ -->
+<style>
+  .summary-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin: 0 0 16px;
+  }
+  @media (max-width: 760px) {
+    .summary-row { grid-template-columns: 1fr; gap: 12px; }
+  }
+  .summary-card {
+    background: var(--bg-elevated, #1a1a1a);
+    border: 0.5px solid var(--border);
+    border-radius: 12px;
+    padding: 16px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .sc-eyebrow {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: var(--fs-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.7px;
+    color: var(--text-muted);
+    font-weight: var(--fw-medium);
+  }
+  .sc-eyebrow .status {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    text-transform: none;
+    letter-spacing: 0;
+    font-weight: var(--fw-regular);
+  }
+  .sc-eyebrow .status .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--text-muted);
+  }
+  .sc-eyebrow .status.good .dot { background: var(--battery-color); }
+  .sc-eyebrow .status.warn .dot { background: #f59e0b; }
+  .sc-eyebrow .status.bad  .dot { background: var(--grid-color); }
+  .sc-hero {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    margin-top: 2px;
+  }
+  .sc-hero .num {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-variant-numeric: tabular-nums;
+    font-size: 36px;
+    font-weight: var(--fw-medium);
+    letter-spacing: -0.02em;
+    line-height: 1;
+    color: var(--text);
+  }
+  .sc-hero .num.small { font-size: 28px; }
+  .sc-hero .label {
+    font-size: var(--fs-sm);
+    color: var(--text-muted);
+  }
+  .sc-stats {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    padding-top: 4px;
+    border-top: 0.5px solid var(--border);
+    margin-top: 2px;
+  }
+  .sc-stat .v {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-variant-numeric: tabular-nums;
+    font-size: var(--fs-md);
+    color: var(--text);
+  }
+  .sc-stat .v.in  { color: var(--grid-color); }
+  .sc-stat .v.out { color: var(--battery-color); }
+  .sc-stat .l {
+    font-size: var(--fs-xs);
+    color: var(--text-muted);
+    margin-top: 2px;
+  }
+  .sc-line {
+    font-size: var(--fs-sm);
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+  }
+  .sc-line .strong { color: var(--text); }
+  .sc-drill {
+    margin-top: auto;
+    padding-top: 8px;
+    font-size: var(--fs-sm);
+    color: var(--text-muted);
+    cursor: pointer;
+    user-select: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .sc-drill:hover { color: var(--text); }
+  .sc-drill .arrow { transition: transform 0.15s; }
+  .sc-drill:hover .arrow { transform: translateX(2px); }
+</style>
+<div class="summary-row" id="summaryRow" style="display:none">
+  <div class="summary-card" id="todayCard">
+    <div class="sc-eyebrow">
+      <span>Today</span>
+      <span class="status" id="todayStatus"><span class="dot"></span><span id="todayStatusText">—</span></span>
+    </div>
+    <div class="sc-hero">
+      <div class="num" id="todayNet">$--</div>
+      <div class="label">net cost</div>
+    </div>
+    <div class="sc-stats">
+      <div class="sc-stat">
+        <div class="v in" id="todayImport">↓ -- kWh</div>
+        <div class="l">imported · <span id="todayImportRate">--</span></div>
+      </div>
+      <div class="sc-stat">
+        <div class="v out" id="todayExport">↑ -- kWh</div>
+        <div class="l">exported · NEM credit</div>
+      </div>
+    </div>
+    <div class="sc-line"><span class="strong" id="todaySelfSuff">--%</span> self-sufficient</div>
+    <div class="sc-drill" onclick="scrollToPanel('costBreakdownPanel')">
+      where it went <span class="arrow">→</span>
+    </div>
+  </div>
+
+  <div class="summary-card" id="tomorrowCard">
+    <div class="sc-eyebrow">
+      <span>Tomorrow</span>
+      <span class="status" id="tomorrowStatus"><span class="dot"></span><span id="tomorrowStatusText">—</span></span>
+    </div>
+    <div class="sc-hero">
+      <div class="num small" id="tomorrowCap">--%</div>
+      <div class="label">charge cap · for tonight</div>
+    </div>
+    <div class="sc-stats">
+      <div class="sc-stat">
+        <div class="v" id="tomorrowCloud">☁ --%</div>
+        <div class="l">cloud · from NWS</div>
+      </div>
+      <div class="sc-stat">
+        <div class="v" id="tomorrowSolar">-- kWh</div>
+        <div class="l">solar predicted · <span id="tomorrowPeakSrc">--</span></div>
+      </div>
+    </div>
+    <div class="sc-line">
+      <span class="strong" id="tomorrowExp">-- kWh</span> export ·
+      <span class="strong" id="tomorrowImp">-- kWh</span> overnight import expected
+    </div>
+    <div class="sc-drill" onclick="scrollToPanel('batteryForecastCard')">
+      reasoning <span class="arrow">→</span>
+    </div>
+  </div>
+</div>
+
+<script>
+function scrollToPanel(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  // Auto-expand the panel if it has a collapsed body
+  const body = el.querySelector('.panel-body, .forecast-grid, .billing-breakdown');
+  if (body && body.style.display === 'none') {
+    // simulate header click to open
+    const header = el.querySelector('.panel-header, .forecast-title');
+    if (header && header.onclick) header.onclick();
+  }
+}
+
+async function refreshSummary() {
+  try {
+    const [todayR, solarR, capR] = await Promise.all([
+      fetch('/api/today').then(r => r.ok ? r.json() : null),
+      fetch('/api/solar?today=true').then(r => r.ok ? r.json() : null),
+      fetch('/api/battery/recommended-cap').then(r => r.ok ? r.json() : null),
+    ]);
+    document.getElementById('summaryRow').style.display = 'grid';
+
+    // ── TODAY ──
+    if (solarR && !solarR.error) {
+      const net = solarR.net_cost ?? 0;
+      const imp = solarR.grid_import_kwh ?? 0;
+      const exp = solarR.grid_export_kwh ?? 0;
+      const consumption = solarR.consumption_kwh ?? 0;
+      const gc = solarR.grid_cost ?? 0;
+      const avgRate = imp > 0.01 ? (gc / imp) : 0;
+
+      // Identify dominant TOU period for the imports
+      const byTou = solarR.by_tou || {};
+      let domTou = 'off-peak';
+      let maxKwh = 0;
+      for (const [k, v] of Object.entries(byTou)) {
+        if ((v.grid_import || 0) > maxKwh) { maxKwh = v.grid_import; domTou = k.replace('_', '-'); }
+      }
+      const rateStr = avgRate > 0 ? `$${avgRate.toFixed(2)}/kWh ${domTou}` : domTou;
+
+      document.getElementById('todayNet').textContent = '$' + net.toFixed(2);
+      document.getElementById('todayImport').textContent = '↓ ' + imp.toFixed(1) + ' kWh';
+      document.getElementById('todayImportRate').textContent = rateStr;
+      document.getElementById('todayExport').textContent = '↑ ' + exp.toFixed(1) + ' kWh';
+
+      const selfSuff = consumption > 0 ? Math.max(0, Math.min(100, Math.round(((consumption - imp) / consumption) * 100))) : 0;
+      document.getElementById('todaySelfSuff').textContent = selfSuff + '%';
+
+      // Status
+      let statusClass = 'good', statusText = 'on track';
+      if (imp > consumption * 0.4) { statusClass = 'bad'; statusText = 'heavy grid import'; }
+      else if (imp > consumption * 0.15) { statusClass = 'warn'; statusText = 'some grid import'; }
+      const statusEl = document.getElementById('todayStatus');
+      statusEl.className = 'status ' + statusClass;
+      document.getElementById('todayStatusText').textContent = statusText;
+    }
+
+    // ── TOMORROW ──
+    if (capR && !capR.error && capR.recommended_cap != null) {
+      const cap = capR.recommended_cap;
+      const sp = capR.solar_prediction || {};
+      const cloud = sp.cloud_cover_pct;
+      const solar = sp.predicted_solar_kwh;
+      const peakSrc = sp.peak_source || 'table';
+      const predExp = capR.predicted_export_kwh;
+      const predImp = capR.predicted_overnight_grid_import_kwh;
+
+      document.getElementById('tomorrowCap').textContent = cap + '%';
+      document.getElementById('tomorrowCloud').textContent = '☁ ' + (cloud != null ? cloud.toFixed(0) : '--') + '%';
+      document.getElementById('tomorrowSolar').textContent = (solar != null ? solar.toFixed(0) : '--') + ' kWh';
+      document.getElementById('tomorrowPeakSrc').textContent = peakSrc === 'observed' ? 'calibrated ✓' : 'from table';
+      document.getElementById('tomorrowExp').textContent = (predExp != null ? predExp.toFixed(1) : '--') + ' kWh';
+      document.getElementById('tomorrowImp').textContent = (predImp != null ? predImp.toFixed(1) : '--') + ' kWh';
+
+      // Health: cap loop healthy if peak_source is observed AND predicted_export is reasonable
+      let statusClass = 'good', statusText = 'cap loop healthy';
+      if (peakSrc !== 'observed') { statusClass = 'warn'; statusText = 'using fallback table'; }
+      if (predExp != null && predExp > 2) { statusClass = 'warn'; statusText = 'export expected'; }
+      const statusEl = document.getElementById('tomorrowStatus');
+      statusEl.className = 'status ' + statusClass;
+      document.getElementById('tomorrowStatusText').textContent = statusText;
+    }
+  } catch (e) {
+    console.error('refreshSummary:', e);
+  }
+}
+refreshSummary();
+setInterval(refreshSummary, 60000);
+</script>
 
 <!-- ================ NEW: At-a-Glance Summary Widget ================ -->
 <style>
@@ -969,7 +1234,8 @@ tr:last-child td { border-bottom: none; }
   }
 </style>
 
-<div class="glance" id="glanceWidget" data-solar>
+<!-- Old glance widget — replaced by .summary-row above. Kept hidden so refreshGlance() still has DOM to write into; nothing breaks. -->
+<div class="glance" id="glanceWidget" data-solar style="display:none">
   <div class="glance-status">
     <span class="dot" id="glanceDot"></span>
     <span id="glanceHeadline">Loading…</span>
@@ -1014,7 +1280,7 @@ tr:last-child td { border-bottom: none; }
   <div class="panel-header" style="cursor:pointer" onclick="toggleCostBreakdown()">
     <div style="display:flex;align-items:center;gap:8px">
       <span id="costBreakdownChevron" style="font-size:var(--fs-sm);color:var(--text-muted)">&#9654;</span>
-      <h2 style="font-size:var(--fs-sm)">Today's spend · <span id="costBreakdownTotal" style="color:var(--text-muted);font-weight:var(--fw-medium)">--</span></h2>
+      <h2 style="font-size:var(--fs-sm);font-weight:var(--fw-regular);color:var(--text-muted);text-transform:none;letter-spacing:0">where today's energy went</h2>
     </div>
   </div>
   <div class="panel-body" style="padding:12px 20px;display:none" id="costBreakdownBody">
@@ -1197,6 +1463,49 @@ refreshCostBreakdown();
 setInterval(refreshCostBreakdown, 60000);
 </script>
 
+<!-- Battery Forecast (drilldown for TOMORROW card — moved up to sit next to today's drilldown) -->
+<div class="battery-forecast" id="batteryForecastCard" data-solar style="display:none">
+  <div class="forecast-title">Tomorrow's Forecast</div>
+  <div class="forecast-grid">
+    <div class="forecast-item">
+      <div class="forecast-label">Cloud Cover</div>
+      <div class="forecast-value"><span id="forecastCloudIcon"></span> <span id="forecastCloudPct">--</span></div>
+    </div>
+    <div class="forecast-item">
+      <div class="forecast-label">Predicted Solar</div>
+      <div class="forecast-value" style="color:var(--solar)" id="forecastSolarKwh">--</div>
+    </div>
+    <div class="forecast-item">
+      <div class="forecast-label">Recommended Cap</div>
+      <div class="forecast-value" style="color:var(--green)" id="forecastCap">--</div>
+    </div>
+    <div class="forecast-item">
+      <div class="forecast-label">Cap Status</div>
+      <div class="forecast-value" id="forecastCapStatus">--</div>
+    </div>
+  </div>
+  <div class="forecast-reasoning" id="forecastReasoning" style="font-size:var(--fs-sm);color:var(--text-muted);line-height:1.6;font-variant-numeric:tabular-nums;font-family:ui-monospace,SFMono-Regular,Menlo,monospace"></div>
+  <div class="forecast-updated" id="forecastUpdated"></div>
+  <div class="forecast-history" id="forecastHistory" style="display:none; margin-top:12px; border-top:1px solid var(--border); padding-top:12px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;cursor:pointer" onclick="toggleForecastHistory()">
+      <span style="font-size:var(--fs-xs);text-transform:uppercase;letter-spacing:0.5px;color:var(--text-muted)">Prediction Accuracy</span>
+      <span id="forecastHistoryChevron" style="font-size:var(--fs-xs);color:var(--text-muted);transition:transform 0.2s">&#9654;</span>
+    </div>
+    <div id="forecastHistoryBody" style="display:none;margin-top:8px;">
+      <table style="width:100%;font-size:var(--fs-sm);">
+        <thead><tr style="color:var(--text-muted)">
+          <th style="text-align:left;font-weight:var(--fw-medium);padding:4px 0">Date</th>
+          <th style="text-align:right;font-weight:var(--fw-medium)">Predicted</th>
+          <th style="text-align:right;font-weight:var(--fw-medium)">Actual</th>
+          <th style="text-align:right;font-weight:var(--fw-medium)">Cap</th>
+          <th style="text-align:right;font-weight:var(--fw-medium)">Exported</th>
+        </tr></thead>
+        <tbody id="forecastHistoryRows"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
 <script>
 function _glanceSpan(text, cls) {
   const s = document.createElement('span');
@@ -1317,18 +1626,8 @@ setInterval(refreshGlance, 60000);
 <!-- ================ END Glance Widget ================ -->
 
 
-<!-- Hero Band -->
-<div class="hero-band" style="justify-content:center;padding:16px 20px;display:flex;align-items:center">
-  <div class="hero-flow" data-solar>
-    <div class="flow-node solar"><span class="flow-label">Solar</span><span class="flow-val" id="solarW">--</span><span class="flow-unit">W</span></div>
-    <span class="flow-arrow">→</span>
-    <div class="flow-node battery" id="batteryCard"><span class="flow-label">Battery</span><span class="flow-val" id="batteryW">--</span><span class="flow-unit">W</span><div class="soc-bar" style="margin-top:4px"><div class="fill" id="socFill" style="width:0%"></div></div><span class="flow-soc"><span id="socPct">--</span>%</span></div>
-    <span class="flow-arrow">→</span>
-    <div class="flow-node home"><span class="flow-label">Home</span><span class="flow-val" id="homeW">--</span><span class="flow-unit">W</span></div>
-    <span class="flow-arrow">→</span>
-    <div class="flow-node grid" id="gridCard"><span class="flow-label">Grid</span><span class="flow-val" id="gridW">--</span><span class="flow-unit">W</span><span class="flow-soc" id="gridDir">--</span></div>
-  </div>
-</div>
+<!-- Hero Band moved up — now sits between header and summary-row. -->
+
 
 <!-- Sub-bar: Monthly / True-up / Battery stats -->
 <div class="sub-bar" style="display:none">
@@ -1379,74 +1678,8 @@ setInterval(refreshGlance, 60000);
   <div class="panel-body" style="padding:12px 20px;display:none" id="opportunitiesList"></div>
 </div>
 
-<!-- Billing Panel -->
-<div class="billing-row" id="billingPanel" data-solar>
-  <div class="billing-card" id="billingMonthlyCard">
-    <div class="billing-title">Monthly Bill Estimate</div>
-    <div class="billing-hero" id="billingMonthlyTotal">--</div>
-    <div class="billing-hero-sub" id="billingMonthlyPeriod">projected this month</div>
-    <div class="billing-breakdown" id="billingBreakdown">
-      <div class="billing-line">
-        <span class="billing-line-label">MCE Generation</span>
-        <span class="billing-line-value" id="billingGeneration">--</span>
-      </div>
-      <div class="billing-line">
-        <span class="billing-line-label">Fixed Charges</span>
-        <span class="billing-line-value" id="billingFixed">--</span>
-      </div>
-      <div class="billing-line deferred">
-        <span class="billing-line-label">NEM Charges <span class="billing-note">(deferred)</span></span>
-        <span class="billing-line-value" id="billingNem">--</span>
-      </div>
-      <div class="billing-divider"></div>
-      <div class="billing-line">
-        <span class="billing-line-label">Grid Import / Export</span>
-        <span class="billing-line-value"><span id="billingImportKwh">--</span> <span style="color:var(--text-muted);font-weight:var(--fw-normal)">/</span> <span id="billingExportKwh">--</span></span>
-      </div>
-      <div class="billing-divider"></div>
-      <div class="billing-line">
-        <span class="billing-line-label">Last Month Actual</span>
-        <span class="billing-line-value" id="billingLastMonth">--</span>
-      </div>
-      <div class="billing-divider"></div>
-      <div class="billing-line">
-        <span class="billing-line-label" style="color:var(--orange)">Gas (PG&E)</span>
-        <span class="billing-line-value"><span id="billingGasCost">--</span> <span style="color:var(--text-muted);font-weight:var(--fw-normal)" id="billingGasForecast">--</span></span>
-      </div>
-      <div class="billing-divider"></div>
-      <div class="billing-line" style="font-weight:var(--fw-bold)">
-        <span class="billing-line-label">Total Bill Estimate</span>
-        <span class="billing-line-value" id="billingTotalWithGas">--</span>
-      </div>
-    </div>
-  </div>
-  <div class="billing-card" id="billingTrueupCard">
-    <div class="billing-title">True-Up Tracker</div>
-    <div class="billing-hero" id="trueupProjected">--</div>
-    <div class="billing-hero-sub">projected annual true-up</div>
-    <div class="trueup-progress">
-      <div class="fill" id="trueupProgressFill" style="width:0%"></div>
-    </div>
-    <div class="trueup-months">
-      <span id="trueupMonthsElapsed">-- months</span>
-      <span>12 months</span>
-    </div>
-    <div class="billing-breakdown" style="margin-top:10px">
-      <div class="billing-line">
-        <span class="billing-line-label">Monthly Avg NEM</span>
-        <span class="billing-line-value" id="trueupMonthlyAvg">--</span>
-      </div>
-      <div class="billing-line">
-        <span class="billing-line-label">YTD NEM Total</span>
-        <span class="billing-line-value" id="trueupYtd">--</span>
-      </div>
-      <div class="billing-line">
-        <span class="billing-line-label">PG&amp;E Reported YTD</span>
-        <span class="billing-line-value" id="trueupPgeYtd">--</span>
-      </div>
-    </div>
-  </div>
-</div>
+<!-- Billing panel moved to a collapsed drilldown near the bottom -->
+
 
 <!-- Energy Flow (Sankey) -->
 <div class="panel" id="energyFlowPanel" data-solar>
@@ -1466,48 +1699,7 @@ setInterval(refreshGlance, 60000);
   </div>
 </div>
 
-<!-- Battery Forecast -->
-<div class="battery-forecast" id="batteryForecastCard" data-solar style="display:none">
-  <div class="forecast-title">Tomorrow's Forecast</div>
-  <div class="forecast-grid">
-    <div class="forecast-item">
-      <div class="forecast-label">Cloud Cover</div>
-      <div class="forecast-value"><span id="forecastCloudIcon"></span> <span id="forecastCloudPct">--</span></div>
-    </div>
-    <div class="forecast-item">
-      <div class="forecast-label">Predicted Solar</div>
-      <div class="forecast-value" style="color:var(--solar)" id="forecastSolarKwh">--</div>
-    </div>
-    <div class="forecast-item">
-      <div class="forecast-label">Recommended Cap</div>
-      <div class="forecast-value" style="color:var(--green)" id="forecastCap">--</div>
-    </div>
-    <div class="forecast-item">
-      <div class="forecast-label">Cap Status</div>
-      <div class="forecast-value" id="forecastCapStatus">--</div>
-    </div>
-  </div>
-  <div class="forecast-reasoning" id="forecastReasoning" style="font-size:var(--fs-sm);color:var(--text-muted);line-height:1.6;font-variant-numeric:tabular-nums;font-family:ui-monospace,SFMono-Regular,Menlo,monospace"></div>
-  <div class="forecast-updated" id="forecastUpdated"></div>
-  <div class="forecast-history" id="forecastHistory" style="display:none; margin-top:12px; border-top:1px solid var(--border); padding-top:12px;">
-    <div style="display:flex;justify-content:space-between;align-items:center;cursor:pointer" onclick="toggleForecastHistory()">
-      <span style="font-size:var(--fs-xs);text-transform:uppercase;letter-spacing:0.5px;color:var(--text-muted)">Prediction Accuracy</span>
-      <span id="forecastHistoryChevron" style="font-size:var(--fs-xs);color:var(--text-muted);transition:transform 0.2s">&#9654;</span>
-    </div>
-    <div id="forecastHistoryBody" style="display:none;margin-top:8px;">
-      <table style="width:100%;font-size:var(--fs-sm);">
-        <thead><tr style="color:var(--text-muted)">
-          <th style="text-align:left;font-weight:var(--fw-medium);padding:4px 0">Date</th>
-          <th style="text-align:right;font-weight:var(--fw-medium)">Predicted</th>
-          <th style="text-align:right;font-weight:var(--fw-medium)">Actual</th>
-          <th style="text-align:right;font-weight:var(--fw-medium)">Cap</th>
-          <th style="text-align:right;font-weight:var(--fw-medium)">Exported</th>
-        </tr></thead>
-        <tbody id="forecastHistoryRows"></tbody>
-      </table>
-    </div>
-  </div>
-</div>
+<!-- Battery Forecast moved up to sit beside cost-breakdown drilldown -->
 
 <!-- Circuits Table -->
 <div class="panel">
@@ -1606,6 +1798,111 @@ setInterval(refreshGlance, 60000);
     </div>
   </div>
 </div>
+
+<!-- Billing & True-up (moved here from top — collapsed drilldown) -->
+<div class="panel" id="billingPanelWrap" data-solar style="display:none">
+  <div class="panel-header" style="cursor:pointer" onclick="toggleBillingPanel()">
+    <div style="display:flex;align-items:center;gap:8px">
+      <span id="billingChevron" style="font-size:var(--fs-sm);color:var(--text-muted);transition:transform 0.2s">&#9654;</span>
+      <h2 style="font-size:var(--fs-sm);font-weight:var(--fw-regular);color:var(--text-muted);text-transform:none;letter-spacing:0">this month · bill projection · true-up</h2>
+    </div>
+    <span style="font-size:var(--fs-sm);color:var(--text-muted)" id="billingPanelSummary"></span>
+  </div>
+  <div class="panel-body" style="padding:16px 20px;display:none" id="billingPanelBody">
+    <div class="billing-row" id="billingPanel" data-solar>
+      <div class="billing-card" id="billingMonthlyCard">
+        <div class="billing-title">Monthly Bill Estimate</div>
+        <div class="billing-hero" id="billingMonthlyTotal">--</div>
+        <div class="billing-hero-sub" id="billingMonthlyPeriod">projected this month</div>
+        <div class="billing-breakdown" id="billingBreakdown">
+          <div class="billing-line">
+            <span class="billing-line-label">MCE Generation</span>
+            <span class="billing-line-value" id="billingGeneration">--</span>
+          </div>
+          <div class="billing-line">
+            <span class="billing-line-label">Fixed Charges</span>
+            <span class="billing-line-value" id="billingFixed">--</span>
+          </div>
+          <div class="billing-line deferred">
+            <span class="billing-line-label">NEM Charges <span class="billing-note">(deferred)</span></span>
+            <span class="billing-line-value" id="billingNem">--</span>
+          </div>
+          <div class="billing-divider"></div>
+          <div class="billing-line">
+            <span class="billing-line-label">Grid Import / Export</span>
+            <span class="billing-line-value"><span id="billingImportKwh">--</span> <span style="color:var(--text-muted);font-weight:var(--fw-normal)">/</span> <span id="billingExportKwh">--</span></span>
+          </div>
+          <div class="billing-divider"></div>
+          <div class="billing-line">
+            <span class="billing-line-label">Last Month Actual</span>
+            <span class="billing-line-value" id="billingLastMonth">--</span>
+          </div>
+          <div class="billing-divider"></div>
+          <div class="billing-line">
+            <span class="billing-line-label" style="color:var(--orange)">Gas (PG&E)</span>
+            <span class="billing-line-value"><span id="billingGasCost">--</span> <span style="color:var(--text-muted);font-weight:var(--fw-normal)" id="billingGasForecast">--</span></span>
+          </div>
+          <div class="billing-divider"></div>
+          <div class="billing-line" style="font-weight:var(--fw-bold)">
+            <span class="billing-line-label">Total Bill Estimate</span>
+            <span class="billing-line-value" id="billingTotalWithGas">--</span>
+          </div>
+        </div>
+      </div>
+      <div class="billing-card" id="billingTrueupCard">
+        <div class="billing-title">True-Up Tracker</div>
+        <div class="billing-hero" id="trueupProjected">--</div>
+        <div class="billing-hero-sub">projected annual true-up</div>
+        <div class="trueup-progress">
+          <div class="fill" id="trueupProgressFill" style="width:0%"></div>
+        </div>
+        <div class="trueup-months">
+          <span id="trueupMonthsElapsed">-- months</span>
+          <span>12 months</span>
+        </div>
+        <div class="billing-breakdown" style="margin-top:10px">
+          <div class="billing-line">
+            <span class="billing-line-label">Monthly Avg NEM</span>
+            <span class="billing-line-value" id="trueupMonthlyAvg">--</span>
+          </div>
+          <div class="billing-line">
+            <span class="billing-line-label">YTD NEM Total</span>
+            <span class="billing-line-value" id="trueupYtd">--</span>
+          </div>
+          <div class="billing-line">
+            <span class="billing-line-label">PG&amp;E Reported YTD</span>
+            <span class="billing-line-value" id="trueupPgeYtd">--</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+function toggleBillingPanel() {
+  const body = document.getElementById('billingPanelBody');
+  const chev = document.getElementById('billingChevron');
+  const open = body.style.display === 'none';
+  body.style.display = open ? 'block' : 'none';
+  chev.textContent = open ? '▼' : '▶';
+}
+// Reveal once the inner total has data; surface a one-line headline in the collapsed header
+function _billingPanelTick() {
+  const wrap = document.getElementById('billingPanelWrap');
+  const total = document.getElementById('billingTotalWithGas');
+  if (!wrap || !total) return;
+  const txt = (total.textContent || '').trim();
+  if (txt && txt !== '--') {
+    wrap.style.display = 'block';
+    const monthly = (document.getElementById('billingMonthlyTotal') || {}).textContent || '--';
+    const trueup = (document.getElementById('trueupProjected') || {}).textContent || '--';
+    document.getElementById('billingPanelSummary').textContent =
+      `bill ${monthly} · true-up ${trueup}`;
+  }
+}
+setInterval(_billingPanelTick, 2000);
+setTimeout(_billingPanelTick, 1500);
+</script>
 
 <!-- Historical Circuits -->
 <div class="panel">
