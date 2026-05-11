@@ -126,7 +126,11 @@ def _observed_peak_solar(month):
             continue
         implied.append(actual / cloud_factor)
 
-    if len(implied) < 5:
+    # Threshold of 3 (was 5): the cap_history can get wiped by concurrent-write
+    # races (mitigated as of 2026-05-11) which leaves us with only the audit log
+    # to rebuild from. 3 sunny-day medians is enough signal; if the median is way
+    # off we'll re-evaluate next session.
+    if len(implied) < 3:
         return None
     implied.sort()
     return round(implied[len(implied) // 2], 1)
@@ -191,12 +195,30 @@ def _load_history():
 
 
 def _save_history(history):
-    """Save prediction history."""
+    """Save prediction history. Atomic write (tmp + rename) to avoid race
+    where a concurrent reader sees a half-written file, _load_history returns
+    [], and the next save wipes everything (this happened 2026-05-11 — lost
+    14 days of actuals that powered _observed_peak_solar calibration)."""
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     history_file = CACHE_DIR / "cap_history.json"
-    # Keep last 90 days
+    # Refuse to clobber a populated file with a tiny one — almost certainly
+    # the load failed and we'd be wiping good data.
+    if history_file.exists() and len(history) < 3:
+        try:
+            existing = json.loads(history_file.read_text())
+            if isinstance(existing, list) and len(existing) > len(history) + 2:
+                print(
+                    f"[cap_history] refusing to shrink history from "
+                    f"{len(existing)} → {len(history)} entries (likely "
+                    f"a partial-load race). Skipping save."
+                )
+                return
+        except Exception:
+            pass
     history = history[-90:]
-    history_file.write_text(json.dumps(history, indent=2))
+    tmp = history_file.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(history, indent=2))
+    tmp.replace(history_file)
 
 
 def _get_yesterday_fill_hour():
