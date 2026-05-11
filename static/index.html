@@ -1449,11 +1449,29 @@ async function refreshCostBreakdown() {
         kind: 'refund',
       }));
     }
+    // Reconcile: the rows above (battery + circuits − refund) should equal net_cost.
+    // Any gap is an attribution artifact in solar_integration.blend_egauge_with_solar
+    // (per-circuit grid_cost includes unmatched-solar-data hours that system.total_grid_cost
+    // skips — see .claude/CONTEXT.md issue #9). Surface it transparently rather than
+    // letting the Net row mysteriously fail to add up.
+    const renderedSum = gridChargeCost
+      + circuits.reduce((s, c) => s + c.grid_cost, 0)
+      - totalExportCredit;
+    const netCost = d.net_cost ?? 0;
+    const gap = netCost - renderedSum;
+    if (Math.abs(gap) > 0.05) {
+      rows.appendChild(_spendRow({
+        name: 'Unaccounted (rounding / timing)',
+        kwh: 0,
+        cost: gap,
+        touSplit: null,
+      }));
+    }
     // Total
     rows.appendChild(_spendRow({
       name: 'Net',
       kwh: d.grid_import_kwh - (d.grid_export_kwh || 0),
-      cost: d.net_cost ?? 0,
+      cost: netCost,
       touSplit: null,
       kind: 'total',
     }));
