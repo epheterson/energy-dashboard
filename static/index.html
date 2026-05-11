@@ -911,7 +911,7 @@ tr:last-child td { border-bottom: none; }
     <div class="flow-node battery" id="batteryCard"><span class="flow-label">Battery</span><span class="flow-val" id="batteryW">--</span><span class="flow-unit">W</span><div class="soc-bar" style="margin-top:4px"><div class="fill" id="socFill" style="width:0%"></div></div><span class="flow-soc"><span id="socPct">--</span>%</span></div>
     <span class="flow-arrow">→</span>
     <div class="flow-node home"><span class="flow-label">Home</span><span class="flow-val" id="homeW">--</span><span class="flow-unit">W</span></div>
-    <span class="flow-arrow">→</span>
+    <span class="flow-arrow" id="homeGridArrow">→</span>
     <div class="flow-node grid" id="gridCard"><span class="flow-label">Grid</span><span class="flow-val" id="gridW">--</span><span class="flow-unit">W</span><span class="flow-soc" id="gridDir">--</span></div>
   </div>
 </div>
@@ -1008,20 +1008,33 @@ tr:last-child td { border-bottom: none; }
     font-variant-numeric: tabular-nums;
   }
   .sc-line .strong { color: var(--text); }
-  .sc-drill {
+  .sc-drill, .sc-toggle {
     margin-top: auto;
-    padding-top: 8px;
+    padding-top: 10px;
+    border-top: 0.5px solid var(--border);
     font-size: var(--fs-sm);
     color: var(--text-muted);
     cursor: pointer;
     user-select: none;
-    display: inline-flex;
+    display: flex;
     align-items: center;
     gap: 6px;
   }
-  .sc-drill:hover { color: var(--text); }
-  .sc-drill .arrow { transition: transform 0.15s; }
+  .sc-drill:hover, .sc-toggle:hover { color: var(--text); }
+  .sc-drill .arrow, .sc-toggle .chev { transition: transform 0.15s; }
   .sc-drill:hover .arrow { transform: translateX(2px); }
+  .sc-detail {
+    padding-top: 10px;
+    margin-top: -2px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .sc-detail-note {
+    font-size: var(--fs-xs);
+    color: var(--text-muted);
+    line-height: 1.5;
+  }
 </style>
 <div class="summary-row" id="summaryRow" style="display:none">
   <div class="summary-card" id="todayCard">
@@ -1044,8 +1057,20 @@ tr:last-child td { border-bottom: none; }
       </div>
     </div>
     <div class="sc-line"><span class="strong" id="todaySelfSuff">--%</span> self-sufficient</div>
-    <div class="sc-drill" onclick="scrollToPanel('costBreakdownPanel')">
-      where it went <span class="arrow">→</span>
+    <div class="sc-toggle" onclick="toggleCardDetail('today')">
+      <span class="chev" id="todayChevron">▶</span> where it went
+    </div>
+    <div class="sc-detail" id="todayDetail" style="display:none">
+      <div class="sc-detail-note">
+        Net cost = cash spent at PG&amp;E today (imports × TOU rate − exports × NEM credit). Battery storage shown separately — that energy is banked for tonight, already paid.
+      </div>
+      <div id="costBreakdownRows"></div>
+      <div class="tou-legend">
+        <span><span class="dot" style="background:var(--grid-color)"></span>peak</span>
+        <span><span class="dot" style="background:#f59e0b"></span>part-peak</span>
+        <span><span class="dot" style="background:var(--battery-color)"></span>off-peak</span>
+      </div>
+      <div id="costBreakdownTouSummary" style="font-size:var(--fs-xs);color:var(--text-muted);font-variant-numeric:tabular-nums;font-family:ui-monospace,SFMono-Regular,Menlo,monospace"></div>
     </div>
   </div>
 
@@ -1072,24 +1097,48 @@ tr:last-child td { border-bottom: none; }
       <span class="strong" id="tomorrowExp">-- kWh</span> export ·
       <span class="strong" id="tomorrowImp">-- kWh</span> overnight import expected
     </div>
-    <div class="sc-drill" onclick="scrollToPanel('batteryForecastCard')">
-      reasoning <span class="arrow">→</span>
+    <div class="sc-toggle" onclick="toggleCardDetail('tomorrow')">
+      <span class="chev" id="tomorrowChevron">▶</span> reasoning
+    </div>
+    <div class="sc-detail" id="tomorrowDetail" style="display:none">
+      <div class="sc-detail-note" id="forecastReasoning" style="font-size:var(--fs-sm);color:var(--text-muted);line-height:1.6;font-variant-numeric:tabular-nums;font-family:ui-monospace,SFMono-Regular,Menlo,monospace"></div>
+      <div id="forecastUpdated" style="font-size:var(--fs-xs);color:var(--text-muted)"></div>
+      <div id="forecastHistory" style="margin-top:6px;border-top:0.5px solid var(--border);padding-top:10px">
+        <div style="display:flex;justify-content:space-between;align-items:center;cursor:pointer" onclick="toggleForecastHistory()">
+          <span style="font-size:var(--fs-xs);text-transform:uppercase;letter-spacing:0.5px;color:var(--text-muted)">Prediction accuracy</span>
+          <span id="forecastHistoryChevron" style="font-size:var(--fs-xs);color:var(--text-muted);transition:transform 0.2s">&#9654;</span>
+        </div>
+        <div id="forecastHistoryBody" style="display:none;margin-top:8px;">
+          <table style="width:100%;font-size:var(--fs-xs);font-variant-numeric:tabular-nums;font-family:ui-monospace,SFMono-Regular,Menlo,monospace">
+            <thead><tr style="color:var(--text-muted)">
+              <th style="text-align:left;font-weight:var(--fw-medium);padding:4px 0">Date</th>
+              <th style="text-align:right;font-weight:var(--fw-medium)">Predicted</th>
+              <th style="text-align:right;font-weight:var(--fw-medium)">Actual</th>
+              <th style="text-align:right;font-weight:var(--fw-medium)">Cap</th>
+              <th style="text-align:right;font-weight:var(--fw-medium)">Exported</th>
+            </tr></thead>
+            <tbody id="forecastHistoryRows"></tbody>
+          </table>
+        </div>
+      </div>
+      <!-- Hidden placeholders so existing JS that writes these doesn't error -->
+      <span id="forecastCloudPct" style="display:none"></span>
+      <span id="forecastCloudIcon" style="display:none"></span>
+      <span id="forecastSolarKwh" style="display:none"></span>
+      <span id="forecastCap" style="display:none"></span>
+      <span id="forecastCapStatus" style="display:none"></span>
     </div>
   </div>
 </div>
 
 <script>
-function scrollToPanel(id) {
-  const el = document.getElementById(id);
-  if (!el) return;
-  el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  // Auto-expand the panel if it has a collapsed body
-  const body = el.querySelector('.panel-body, .forecast-grid, .billing-breakdown');
-  if (body && body.style.display === 'none') {
-    // simulate header click to open
-    const header = el.querySelector('.panel-header, .forecast-title');
-    if (header && header.onclick) header.onclick();
-  }
+function toggleCardDetail(which) {
+  const detail = document.getElementById(which + 'Detail');
+  const chev = document.getElementById(which + 'Chevron');
+  if (!detail || !chev) return;
+  const open = detail.style.display === 'none';
+  detail.style.display = open ? 'flex' : 'none';
+  chev.textContent = open ? '▼' : '▶';
 }
 
 async function refreshSummary() {
@@ -1259,52 +1308,26 @@ setInterval(refreshSummary, 60000);
   </div>
 </div>
 
-<!-- Today's spend — destinations of grid imports -->
+<!-- Today's spend styles (used inside the TODAY card detail section) -->
 <style>
   .spend-row { display: grid; grid-template-columns: 1fr auto auto 80px; gap: 12px; align-items: center; padding: 4px 0; font-size: var(--fs-sm); }
   .spend-row .name { color: var(--text); }
   .spend-row .kwh, .spend-row .cost { color: var(--text-muted); font-variant-numeric: tabular-nums; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
   .spend-row .cost { color: var(--text); }
   .spend-row.refund .name, .spend-row.refund .kwh, .spend-row.refund .cost { color: var(--battery-color); }
-  .spend-row.total { border-top: 1px solid var(--border); margin-top: 6px; padding-top: 8px; font-size: var(--fs-md); }
+  .spend-row.total { border-top: 0.5px solid var(--border); margin-top: 6px; padding-top: 8px; font-size: var(--fs-md); }
   .spend-row.total .name { font-weight: var(--fw-medium); }
   .spend-row.total .cost { font-weight: var(--fw-medium); }
   .tou-bar { display: flex; height: 4px; background: var(--border); border-radius: 2px; overflow: hidden; }
   .tou-bar .seg.peak { background: var(--grid-color); }
   .tou-bar .seg.part_peak { background: #f59e0b; }
   .tou-bar .seg.off_peak { background: var(--battery-color); }
-  .tou-legend { display: flex; gap: 12px; font-size: var(--fs-xs); color: var(--text-muted); margin-top: 6px; }
+  .tou-legend { display: flex; gap: 12px; font-size: var(--fs-xs); color: var(--text-muted); }
   .tou-legend .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; vertical-align: middle; }
 </style>
-<div class="panel" id="costBreakdownPanel" data-solar style="display:none">
-  <div class="panel-header" style="cursor:pointer" onclick="toggleCostBreakdown()">
-    <div style="display:flex;align-items:center;gap:8px">
-      <span id="costBreakdownChevron" style="font-size:var(--fs-sm);color:var(--text-muted)">&#9654;</span>
-      <h2 style="font-size:var(--fs-sm);font-weight:var(--fw-regular);color:var(--text-muted);text-transform:none;letter-spacing:0">where today's energy went</h2>
-    </div>
-  </div>
-  <div class="panel-body" style="padding:12px 20px;display:none" id="costBreakdownBody">
-    <div style="font-size:var(--fs-xs);color:var(--text-muted);margin-bottom:10px">
-      Cash spent at PG&amp;E today, by what the grid energy powered. Battery storage is energy banked for tonight (already paid).
-    </div>
-    <div id="costBreakdownRows"></div>
-    <div class="tou-legend">
-      <span><span class="dot" style="background:var(--grid-color)"></span>peak</span>
-      <span><span class="dot" style="background:#f59e0b"></span>part-peak</span>
-      <span><span class="dot" style="background:var(--battery-color)"></span>off-peak</span>
-    </div>
-    <div id="costBreakdownTouSummary" style="margin-top:10px;font-size:var(--fs-xs);color:var(--text-muted);font-variant-numeric:tabular-nums;font-family:ui-monospace,SFMono-Regular,Menlo,monospace"></div>
-  </div>
-</div>
 
 <script>
-function toggleCostBreakdown() {
-  const body = document.getElementById('costBreakdownBody');
-  const chev = document.getElementById('costBreakdownChevron');
-  const open = body.style.display === 'none';
-  body.style.display = open ? 'block' : 'none';
-  chev.textContent = open ? '▼' : '▶';
-}
+// toggleCostBreakdown deprecated — destinations live inside TODAY card now (use toggleCardDetail).
 function _spendRow({ name, kwh, cost, touSplit, kind }) {
   const row = document.createElement('div');
   row.className = 'spend-row' + (kind ? ' ' + kind : '');
@@ -1344,11 +1367,7 @@ async function refreshCostBreakdown() {
     const r = await fetch('/api/solar?today=true');
     if (!r.ok) return;
     const d = await r.json();
-    document.getElementById('costBreakdownPanel').style.display = 'block';
-
-    // Headline number
-    const netCost = d.net_cost ?? 0;
-    document.getElementById('costBreakdownTotal').textContent = '$' + netCost.toFixed(2);
+    // Destinations live inside TODAY card; just populate rows + TOU summary.
 
     // Battery TOU split (grid portion only) — derived from hourly_source
     // Assumes grid-vs-solar charge ratio is uniform across hours (good enough for display).
@@ -1434,7 +1453,7 @@ async function refreshCostBreakdown() {
     rows.appendChild(_spendRow({
       name: 'Net',
       kwh: d.grid_import_kwh - (d.grid_export_kwh || 0),
-      cost: netCost,
+      cost: d.net_cost ?? 0,
       touSplit: null,
       kind: 'total',
     }));
@@ -1463,48 +1482,7 @@ refreshCostBreakdown();
 setInterval(refreshCostBreakdown, 60000);
 </script>
 
-<!-- Battery Forecast (drilldown for TOMORROW card — moved up to sit next to today's drilldown) -->
-<div class="battery-forecast" id="batteryForecastCard" data-solar style="display:none">
-  <div class="forecast-title">Tomorrow's Forecast</div>
-  <div class="forecast-grid">
-    <div class="forecast-item">
-      <div class="forecast-label">Cloud Cover</div>
-      <div class="forecast-value"><span id="forecastCloudIcon"></span> <span id="forecastCloudPct">--</span></div>
-    </div>
-    <div class="forecast-item">
-      <div class="forecast-label">Predicted Solar</div>
-      <div class="forecast-value" style="color:var(--solar)" id="forecastSolarKwh">--</div>
-    </div>
-    <div class="forecast-item">
-      <div class="forecast-label">Recommended Cap</div>
-      <div class="forecast-value" style="color:var(--green)" id="forecastCap">--</div>
-    </div>
-    <div class="forecast-item">
-      <div class="forecast-label">Cap Status</div>
-      <div class="forecast-value" id="forecastCapStatus">--</div>
-    </div>
-  </div>
-  <div class="forecast-reasoning" id="forecastReasoning" style="font-size:var(--fs-sm);color:var(--text-muted);line-height:1.6;font-variant-numeric:tabular-nums;font-family:ui-monospace,SFMono-Regular,Menlo,monospace"></div>
-  <div class="forecast-updated" id="forecastUpdated"></div>
-  <div class="forecast-history" id="forecastHistory" style="display:none; margin-top:12px; border-top:1px solid var(--border); padding-top:12px;">
-    <div style="display:flex;justify-content:space-between;align-items:center;cursor:pointer" onclick="toggleForecastHistory()">
-      <span style="font-size:var(--fs-xs);text-transform:uppercase;letter-spacing:0.5px;color:var(--text-muted)">Prediction Accuracy</span>
-      <span id="forecastHistoryChevron" style="font-size:var(--fs-xs);color:var(--text-muted);transition:transform 0.2s">&#9654;</span>
-    </div>
-    <div id="forecastHistoryBody" style="display:none;margin-top:8px;">
-      <table style="width:100%;font-size:var(--fs-sm);">
-        <thead><tr style="color:var(--text-muted)">
-          <th style="text-align:left;font-weight:var(--fw-medium);padding:4px 0">Date</th>
-          <th style="text-align:right;font-weight:var(--fw-medium)">Predicted</th>
-          <th style="text-align:right;font-weight:var(--fw-medium)">Actual</th>
-          <th style="text-align:right;font-weight:var(--fw-medium)">Cap</th>
-          <th style="text-align:right;font-weight:var(--fw-medium)">Exported</th>
-        </tr></thead>
-        <tbody id="forecastHistoryRows"></tbody>
-      </table>
-    </div>
-  </div>
-</div>
+<!-- Battery forecast detail now lives inside the TOMORROW card's collapsible drilldown. -->
 
 <script>
 function _glanceSpan(text, cls) {
@@ -1660,28 +1638,7 @@ setInterval(refreshGlance, 60000);
   <div class="ev-bar-detail" id="evBarDetail" style="display:none"></div>
 </div>
 
-<!-- Insight Bar -->
-<div class="insight-bar" id="insightBar">
-  <span class="insight-icon" id="insightIcon"></span>
-  <span class="insight-text" id="insightText"></span>
-</div>
-
-<!-- Optimization Opportunities -->
-<div class="panel" id="opportunitiesPanel" style="display:none">
-  <div class="panel-header" style="cursor:pointer" onclick="toggleOpportunities()">
-    <div style="display:flex;align-items:center;gap:8px">
-      <span id="oppChevron" style="font-size:var(--fs-sm);color:var(--text-muted);transition:transform 0.2s">&#9654;</span>
-      <h2 style="font-size:var(--fs-sm)">Optimization</h2>
-    </div>
-    <span style="font-size:var(--fs-sm);color:var(--text-muted)" id="oppSummary"></span>
-  </div>
-  <div class="panel-body" style="padding:12px 20px;display:none" id="opportunitiesList"></div>
-</div>
-
-<!-- Billing panel moved to a collapsed drilldown near the bottom -->
-
-
-<!-- Energy Flow (Sankey) -->
+<!-- Energy Flow (Sankey) — promoted to right under cards/EV per layout request -->
 <div class="panel" id="energyFlowPanel" data-solar>
   <div class="panel-header">
     <h2>Energy Flow</h2>
@@ -1699,7 +1656,23 @@ setInterval(refreshGlance, 60000);
   </div>
 </div>
 
-<!-- Battery Forecast moved up to sit beside cost-breakdown drilldown -->
+<!-- Insight Bar -->
+<div class="insight-bar" id="insightBar">
+  <span class="insight-icon" id="insightIcon"></span>
+  <span class="insight-text" id="insightText"></span>
+</div>
+
+<!-- Optimization Opportunities -->
+<div class="panel" id="opportunitiesPanel" style="display:none">
+  <div class="panel-header" style="cursor:pointer" onclick="toggleOpportunities()">
+    <div style="display:flex;align-items:center;gap:8px">
+      <span id="oppChevron" style="font-size:var(--fs-sm);color:var(--text-muted);transition:transform 0.2s">&#9654;</span>
+      <h2 style="font-size:var(--fs-sm)">Optimization</h2>
+    </div>
+    <span style="font-size:var(--fs-sm);color:var(--text-muted)" id="oppSummary"></span>
+  </div>
+  <div class="panel-body" style="padding:12px 20px;display:none" id="opportunitiesList"></div>
+</div>
 
 <!-- Circuits Table -->
 <div class="panel">
@@ -2008,17 +1981,21 @@ function updateLive(d) {
   const batLabel = batCard.querySelector('.flow-label') || batCard.querySelector('.label');
   if (batLabel) batLabel.textContent = d.battery_w > BATTERY_IDLE_W ? 'Battery ↓' : d.battery_w < -BATTERY_IDLE_W ? 'Battery ↑' : 'Battery';
 
-  // Grid direction
+  // Grid direction — flip the home↔grid arrow with actual flow
   const gridCard = document.getElementById('gridCard');
   const gridDir = document.getElementById('gridDir');
+  const homeGridArrow = document.getElementById('homeGridArrow');
   if (d.grid_w > 0) {
-    gridDir.textContent = '← Importing';
+    gridDir.textContent = 'Importing';
+    if (homeGridArrow) homeGridArrow.textContent = '←';
     gridCard.classList.remove('exporting');
   } else if (d.grid_w < 0) {
-    gridDir.textContent = '→ Exporting';
+    gridDir.textContent = 'Exporting';
+    if (homeGridArrow) homeGridArrow.textContent = '→';
     gridCard.classList.add('exporting');
   } else {
-    gridDir.textContent = '— Idle';
+    gridDir.textContent = 'Idle';
+    if (homeGridArrow) homeGridArrow.textContent = '·';
     gridCard.classList.remove('exporting');
   }
 
@@ -3458,8 +3435,8 @@ async function loadBatteryForecast() {
     const d = await r.json();
     if (d.error) throw new Error(d.error);
     updateBatteryForecast(d);
-    document.getElementById('batteryForecastCard').style.display = '';
-    document.getElementById('forecastHistory').style.display = '';
+    // batteryForecastCard panel was rolled into TOMORROW card's collapsible detail;
+    // the inner elements (forecastReasoning, forecastUpdated, forecastHistory*) still exist there.
   } catch (e) {
     console.error('loadBatteryForecast error:', e);
     showForecastUnavailable();
@@ -3599,16 +3576,13 @@ async function loadForecastHistory() {
 }
 
 function showForecastUnavailable() {
-  const card = document.getElementById('batteryForecastCard');
-  card.style.display = '';
-  document.getElementById('forecastCloudPct').textContent = '--';
-  document.getElementById('forecastCloudIcon').textContent = '';
-  document.getElementById('forecastSolarKwh').textContent = '--';
-  document.getElementById('forecastCap').textContent = '--';
-  document.getElementById('forecastCapStatus').textContent = '--';
-  const reasoning = document.getElementById('forecastReasoning');
-  reasoning.textContent = 'Forecast data unavailable';
-  reasoning.style.display = '';
+  const _set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+  _set('forecastCloudPct', '--');
+  _set('forecastCloudIcon', '');
+  _set('forecastSolarKwh', '--');
+  _set('forecastCap', '--');
+  _set('forecastCapStatus', '--');
+  _set('forecastReasoning', 'Forecast data unavailable');
 }
 
 // ==========================================
