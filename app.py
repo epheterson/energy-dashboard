@@ -973,6 +973,26 @@ async def api_ev_history(days: int = 7):
 
     total_kwh = ev_circuit["total_kwh"]
     total_cost = ev_circuit["total_cost"]
+
+    # Prefer solar-blended per-circuit cost when available — /api/history
+    # applies a day-level grid_share to every circuit's cost, which incorrectly
+    # discounts circuits that run 100% on grid at specific times of day
+    # (the EV charges overnight when there's no solar, so its grid_share should
+    # be ~100%, but the day-average grid_share is ~75% because the rest of the
+    # home was on solar during the day). The solar endpoint computes per-hour
+    # per-circuit grid_share, which is the right number for cost.
+    if is_solar_enabled():
+        try:
+            solar = await fetch_solar(days)
+            if solar and not solar.get("error"):
+                for sc in solar.get("circuits", []):
+                    if sc.get("name") == "EV Charger":
+                        # actual_cost = grid_cost (TOU rates × grid kWh) + battery_cost
+                        total_cost = float(sc.get("actual_cost") or total_cost)
+                        break
+        except Exception as e:
+            print(f"EV cost solar-blend fetch failed: {e}")
+
     miles = total_kwh * avg_efficiency
     gas_price = get_ev_config().get("gas_price_per_gallon", 4.50)
     gas_equivalent = miles / 25 * gas_price
