@@ -993,52 +993,41 @@ tr:last-child td { border-bottom: none; }
   </div>
 </div>
 
-<!-- Cost Breakdown — where today's net cost came from -->
+<!-- Today's spend — destinations of grid imports -->
+<style>
+  .spend-row { display: grid; grid-template-columns: 1fr auto auto 80px; gap: 12px; align-items: center; padding: 4px 0; font-size: var(--fs-sm); }
+  .spend-row .name { color: var(--text); }
+  .spend-row .kwh, .spend-row .cost { color: var(--text-muted); font-variant-numeric: tabular-nums; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .spend-row .cost { color: var(--text); }
+  .spend-row.refund .name, .spend-row.refund .kwh, .spend-row.refund .cost { color: var(--battery-color); }
+  .spend-row.total { border-top: 1px solid var(--border); margin-top: 6px; padding-top: 8px; font-size: var(--fs-md); }
+  .spend-row.total .name { font-weight: var(--fw-medium); }
+  .spend-row.total .cost { font-weight: var(--fw-medium); }
+  .tou-bar { display: flex; height: 4px; background: var(--border); border-radius: 2px; overflow: hidden; }
+  .tou-bar .seg.peak { background: var(--grid-color); }
+  .tou-bar .seg.part_peak { background: #f59e0b; }
+  .tou-bar .seg.off_peak { background: var(--battery-color); }
+  .tou-legend { display: flex; gap: 12px; font-size: var(--fs-xs); color: var(--text-muted); margin-top: 6px; }
+  .tou-legend .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; vertical-align: middle; }
+</style>
 <div class="panel" id="costBreakdownPanel" data-solar style="display:none">
   <div class="panel-header" style="cursor:pointer" onclick="toggleCostBreakdown()">
-    <h2>Where today's cost came from</h2>
-    <span id="costBreakdownChevron" style="font-size:var(--fs-sm);color:var(--text-muted)">&#9654;</span>
+    <div style="display:flex;align-items:center;gap:8px">
+      <span id="costBreakdownChevron" style="font-size:var(--fs-sm);color:var(--text-muted)">&#9654;</span>
+      <h2 style="font-size:var(--fs-sm)">Today's spend · <span id="costBreakdownTotal" style="color:var(--text-muted);font-weight:var(--fw-medium)">--</span></h2>
+    </div>
   </div>
-  <div class="panel-body" style="padding:16px 20px;display:none" id="costBreakdownBody">
-    <div style="font-size:var(--fs-sm);color:var(--text-muted);margin-bottom:12px">
-      Net cost = cash actually spent at PG&amp;E today (grid imports × TOU rate − exports × NEM credit).
-      Battery discharge isn't included because the energy in the battery was already paid for when it was grid-charged.
+  <div class="panel-body" style="padding:12px 20px;display:none" id="costBreakdownBody">
+    <div style="font-size:var(--fs-xs);color:var(--text-muted);margin-bottom:10px">
+      Cash spent at PG&amp;E today, by what the grid energy powered. Battery storage is energy banked for tonight (already paid).
     </div>
-    <table style="width:100%;font-variant-numeric:tabular-nums;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:var(--fs-sm)">
-      <thead>
-        <tr style="text-align:left;color:var(--text-muted)">
-          <th style="padding:4px 0">TOU period</th>
-          <th class="right">Imported</th>
-          <th class="right">× Rate</th>
-          <th class="right">= $ in</th>
-          <th class="right">Exported</th>
-          <th class="right">× Credit</th>
-          <th class="right">$ out</th>
-          <th class="right">Subtotal</th>
-        </tr>
-      </thead>
-      <tbody id="costBreakdownByTou"></tbody>
-      <tfoot id="costBreakdownTotals" style="border-top:2px solid var(--border);font-weight:var(--fw-medium)"></tfoot>
-    </table>
-    <div style="margin-top:16px">
-      <div style="font-size:var(--fs-xs);text-transform:uppercase;letter-spacing:0.5px;color:var(--text-muted);cursor:pointer" onclick="toggleHourBreakdown()">
-        <span id="hourBreakdownChevron">&#9654;</span> Hour-by-hour
-      </div>
-      <table id="costBreakdownByHour" style="width:100%;margin-top:8px;display:none;font-variant-numeric:tabular-nums;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:var(--fs-xs)">
-        <thead>
-          <tr style="text-align:left;color:var(--text-muted)">
-            <th style="padding:4px 0">Hour</th>
-            <th>TOU</th>
-            <th class="right">Imp kWh</th>
-            <th class="right">$ in</th>
-            <th class="right">Exp kWh</th>
-            <th class="right">$ out</th>
-            <th class="right">Net</th>
-          </tr>
-        </thead>
-        <tbody id="costBreakdownByHourBody"></tbody>
-      </table>
+    <div id="costBreakdownRows"></div>
+    <div class="tou-legend">
+      <span><span class="dot" style="background:var(--grid-color)"></span>peak</span>
+      <span><span class="dot" style="background:#f59e0b"></span>part-peak</span>
+      <span><span class="dot" style="background:var(--battery-color)"></span>off-peak</span>
     </div>
+    <div id="costBreakdownTouSummary" style="margin-top:10px;font-size:var(--fs-xs);color:var(--text-muted);font-variant-numeric:tabular-nums;font-family:ui-monospace,SFMono-Regular,Menlo,monospace"></div>
   </div>
 </div>
 
@@ -1050,89 +1039,156 @@ function toggleCostBreakdown() {
   body.style.display = open ? 'block' : 'none';
   chev.textContent = open ? '▼' : '▶';
 }
-function toggleHourBreakdown() {
-  const t = document.getElementById('costBreakdownByHour');
-  const c = document.getElementById('hourBreakdownChevron');
-  const open = t.style.display === 'none';
-  t.style.display = open ? 'table' : 'none';
-  c.textContent = open ? '▼' : '▶';
-}
-function _cbCell(text, opts) {
-  const td = document.createElement('td');
-  td.textContent = text;
-  if (opts?.right) td.className = 'right';
-  if (opts?.padTop) td.style.padding = opts.padTop + ' 0';
-  if (opts?.bigger) td.style.fontSize = 'var(--fs-md)';
-  return td;
+function _spendRow({ name, kwh, cost, touSplit, kind }) {
+  const row = document.createElement('div');
+  row.className = 'spend-row' + (kind ? ' ' + kind : '');
+  const nameEl = document.createElement('div');
+  nameEl.className = 'name';
+  nameEl.textContent = name;
+  const kwhEl = document.createElement('div');
+  kwhEl.className = 'kwh';
+  kwhEl.textContent = (kwh >= 0 ? '' : '−') + Math.abs(kwh).toFixed(2) + ' kWh';
+  const costEl = document.createElement('div');
+  costEl.className = 'cost';
+  costEl.textContent = (cost >= 0 ? '$' : '−$') + Math.abs(cost).toFixed(2);
+  const bar = document.createElement('div');
+  bar.className = 'tou-bar';
+  if (touSplit) {
+    const total = (touSplit.peak || 0) + (touSplit.part_peak || 0) + (touSplit.off_peak || 0);
+    if (total > 0.001) {
+      for (const p of ['peak', 'part_peak', 'off_peak']) {
+        const v = touSplit[p] || 0;
+        if (v > 0) {
+          const seg = document.createElement('div');
+          seg.className = 'seg ' + p;
+          seg.style.width = (v / total * 100).toFixed(1) + '%';
+          bar.appendChild(seg);
+        }
+      }
+    }
+  }
+  row.appendChild(nameEl);
+  row.appendChild(kwhEl);
+  row.appendChild(costEl);
+  row.appendChild(bar);
+  return row;
 }
 async function refreshCostBreakdown() {
   try {
     const r = await fetch('/api/solar?today=true');
     if (!r.ok) return;
     const d = await r.json();
-    const panel = document.getElementById('costBreakdownPanel');
-    panel.style.display = 'block';
+    document.getElementById('costBreakdownPanel').style.display = 'block';
 
+    // Headline number
+    const netCost = d.net_cost ?? 0;
+    document.getElementById('costBreakdownTotal').textContent = '$' + netCost.toFixed(2);
+
+    // Battery TOU split (grid portion only) — derived from hourly_source
+    // Assumes grid-vs-solar charge ratio is uniform across hours (good enough for display).
+    const battery = d.battery || {};
+    const totalCharge = battery.charge_kwh || 0;
+    const gridChargeKwh = battery.grid_charge_kwh || 0;
+    const gridChargeCost = battery.grid_charge_cost || 0;
+    const gridShare = totalCharge > 0.001 ? (gridChargeKwh / totalCharge) : 0;
+    const batteryByTou = { peak: 0, part_peak: 0, off_peak: 0 };
+    for (const h of (d.hourly || [])) {
+      const period = h.tou_period || 'off_peak';
+      if (period in batteryByTou) batteryByTou[period] += (h.battery_charge_kwh || 0) * gridShare;
+    }
+
+    // Per-circuit destinations: kWh from grid + cost (already in circuits[])
+    const circuits = (d.circuits || []).map(c => {
+      const tou = c.by_tou || {};
+      return {
+        name: c.name,
+        grid_kwh: c.grid_kwh || 0,
+        grid_cost: c.grid_cost || 0,
+        tou: {
+          peak: (tou.peak || {}).grid_kwh || 0,
+          part_peak: (tou.part_peak || {}).grid_kwh || 0,
+          off_peak: (tou.off_peak || {}).grid_kwh || 0,
+        }
+      };
+    }).filter(c => c.grid_cost > 0.005).sort((a, b) => b.grid_cost - a.grid_cost);
+
+    // Render
+    const rows = document.getElementById('costBreakdownRows');
+    while (rows.firstChild) rows.removeChild(rows.firstChild);
+
+    // Battery first (banked for tonight)
+    if (gridChargeCost > 0.005) {
+      rows.appendChild(_spendRow({
+        name: 'Battery storage (banked for tonight)',
+        kwh: gridChargeKwh,
+        cost: gridChargeCost,
+        touSplit: batteryByTou,
+      }));
+    }
+    // Top circuits — collapse small ones into "Other"
+    const TOP_N = 6;
+    const top = circuits.slice(0, TOP_N);
+    const rest = circuits.slice(TOP_N);
+    for (const c of top) {
+      rows.appendChild(_spendRow({
+        name: c.name,
+        kwh: c.grid_kwh,
+        cost: c.grid_cost,
+        touSplit: c.tou,
+      }));
+    }
+    if (rest.length > 0) {
+      const restKwh = rest.reduce((s, c) => s + c.grid_kwh, 0);
+      const restCost = rest.reduce((s, c) => s + c.grid_cost, 0);
+      const restTou = { peak: 0, part_peak: 0, off_peak: 0 };
+      for (const c of rest) {
+        restTou.peak += c.tou.peak;
+        restTou.part_peak += c.tou.part_peak;
+        restTou.off_peak += c.tou.off_peak;
+      }
+      rows.appendChild(_spendRow({
+        name: `Other (${rest.length} circuits)`,
+        kwh: restKwh,
+        cost: restCost,
+        touSplit: restTou,
+      }));
+    }
+    // Export refund
+    const totalExportCredit = d.export_credit || 0;
+    if (totalExportCredit > 0.005) {
+      rows.appendChild(_spendRow({
+        name: 'Refund (solar exported)',
+        kwh: -(d.grid_export_kwh || 0),
+        cost: -totalExportCredit,
+        touSplit: null,
+        kind: 'refund',
+      }));
+    }
+    // Total
+    rows.appendChild(_spendRow({
+      name: 'Net',
+      kwh: d.grid_import_kwh - (d.grid_export_kwh || 0),
+      cost: netCost,
+      touSplit: null,
+      kind: 'total',
+    }));
+
+    // TOU summary line
     const byTou = d.by_tou || {};
-    const periods = [
-      ['peak', 'Peak'],
-      ['part_peak', 'Part-peak'],
-      ['off_peak', 'Off-peak'],
-    ];
-    const tbody = document.getElementById('costBreakdownByTou');
-    while (tbody.firstChild) tbody.removeChild(tbody.firstChild);
-    let totalImp = 0, totalIn = 0, totalExp = 0, totalOut = 0;
-    for (const [k, label] of periods) {
+    const touLines = [];
+    for (const [k, label] of [['off_peak', 'off-peak'], ['part_peak', 'part-peak'], ['peak', 'peak']]) {
       const p = byTou[k] || {};
       const imp = p.grid_import || 0;
       const cin = p.grid_cost || 0;
       const exp = p.grid_export || 0;
       const cout = p.export_credit || 0;
+      if (imp < 0.01 && exp < 0.01) continue;
       const rate = imp > 0.01 ? (cin / imp) : 0;
-      const credit = exp > 0.01 ? (cout / exp) : 0;
-      const subtotal = cin - cout;
-      totalImp += imp; totalIn += cin; totalExp += exp; totalOut += cout;
-      const tr = document.createElement('tr');
-      tr.appendChild(_cbCell(label, {padTop: '4px'}));
-      tr.appendChild(_cbCell(imp.toFixed(2) + ' kWh', {right: true}));
-      tr.appendChild(_cbCell('$' + rate.toFixed(3) + '/kWh', {right: true}));
-      tr.appendChild(_cbCell('$' + cin.toFixed(2), {right: true}));
-      tr.appendChild(_cbCell(exp.toFixed(2) + ' kWh', {right: true}));
-      tr.appendChild(_cbCell('$' + credit.toFixed(3) + '/kWh', {right: true}));
-      tr.appendChild(_cbCell('−$' + cout.toFixed(2), {right: true}));
-      tr.appendChild(_cbCell('$' + subtotal.toFixed(2), {right: true}));
-      tbody.appendChild(tr);
+      let line = `${label}: ${imp.toFixed(1)} kWh × $${rate.toFixed(2)} = $${cin.toFixed(2)}`;
+      if (exp > 0.01) line += ` · exported ${exp.toFixed(1)} kWh = −$${cout.toFixed(2)}`;
+      touLines.push(line);
     }
-    const tfoot = document.getElementById('costBreakdownTotals');
-    while (tfoot.firstChild) tfoot.removeChild(tfoot.firstChild);
-    const netTotal = totalIn - totalOut;
-    const ftr = document.createElement('tr');
-    ftr.appendChild(_cbCell('Total', {padTop: '6px'}));
-    ftr.appendChild(_cbCell(totalImp.toFixed(2) + ' kWh', {right: true}));
-    ftr.appendChild(_cbCell('', {right: true}));
-    ftr.appendChild(_cbCell('$' + totalIn.toFixed(2), {right: true}));
-    ftr.appendChild(_cbCell(totalExp.toFixed(2) + ' kWh', {right: true}));
-    ftr.appendChild(_cbCell('', {right: true}));
-    ftr.appendChild(_cbCell('−$' + totalOut.toFixed(2), {right: true}));
-    ftr.appendChild(_cbCell('$' + netTotal.toFixed(2), {right: true, bigger: true}));
-    tfoot.appendChild(ftr);
-
-    const hourBody = document.getElementById('costBreakdownByHourBody');
-    while (hourBody.firstChild) hourBody.removeChild(hourBody.firstChild);
-    const hourly = d.hourly || [];
-    for (const h of hourly) {
-      const cin = h.grid_cost || 0;
-      const cout = h.export_credit || 0;
-      const tr = document.createElement('tr');
-      tr.appendChild(_cbCell(String(h.hour).padStart(2,'0') + ':00', {padTop: '2px'}));
-      tr.appendChild(_cbCell((h.tou_period || '').replace('_',' ')));
-      tr.appendChild(_cbCell((h.grid_import_kwh || 0).toFixed(2), {right: true}));
-      tr.appendChild(_cbCell('$' + cin.toFixed(2), {right: true}));
-      tr.appendChild(_cbCell((h.grid_export_kwh || 0).toFixed(2), {right: true}));
-      tr.appendChild(_cbCell('−$' + cout.toFixed(2), {right: true}));
-      tr.appendChild(_cbCell('$' + (cin - cout).toFixed(2), {right: true}));
-      hourBody.appendChild(tr);
-    }
+    document.getElementById('costBreakdownTouSummary').textContent = touLines.join(' · ');
   } catch (e) {
     console.error('refreshCostBreakdown:', e);
   }
