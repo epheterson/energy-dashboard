@@ -678,27 +678,64 @@ def _build_history(days):
                 # The frontend prefers solar-blended actual_cost from /api/solar,
                 # so this mostly affects API consumers, but EV-charger-class
                 # circuits (off-peak-only) were being under-counted ~60% here.
-                if day_grid_share:
+                # Structural fix (2026-05-11): per-circuit cost data now flows
+                # directly from solar's per-hour per-circuit blend, NOT from
+                # scaling gross-retail by window-average shares. The reviewer's
+                # observation: "never leave the per-hour loop" — every
+                # attribution should be finalized inside the hour iterator and
+                # accumulated into typed buckets. blend_egauge_with_solar
+                # already does that for per-circuit per-TOU; we just need to
+                # USE its output instead of re-deriving via approximation.
+                try:
+                    from solar_integration import blend_egauge_with_solar as _blend
+
+                    blended, _sys = _blend(hourly_data, solar_hourly)
+                    by_name = {
+                        reg.replace(" [kWh]", ""): st for reg, st in blended.items()
+                    }
+                    days_count = max(1, len(daily))
                     for c in circuits:
-                        # Per-circuit by_tou: use the per-TOU window grid_share.
-                        # Catches the EV-class bug: EV runs only off-peak (high
-                        # grid_share); old code applied the window-avg (~22%)
-                        # to all periods, so EV cost was 60% under-stated.
-                        for period in c.get("by_tou", {}):
-                            share = period_window_share.get(period, 1.0)
-                            c["by_tou"][period]["cost"] = round(
-                                c["by_tou"][period].get("cost", 0) * share, 2
-                            )
-                        # Total cost = sum of per-period costs (internal
-                        # consistency). Previously total was scaled by a
-                        # different (window-avg) share, so total didn't equal
-                        # sum-of-periods. User caught this 2026-05-11.
-                        c["total_cost"] = round(
-                            sum(v.get("cost", 0) for v in c.get("by_tou", {}).values()),
-                            2,
-                        )
-                        days_count = max(1, len(daily))
+                        s = by_name.get(c["name"])
+                        if not s:
+                            continue
+                        # Per-hour-precise: actual cost = grid_cost + battery_cost
+                        # (the second is amortized grid-charge cost of energy
+                        # the battery later discharged to this circuit).
+                        c["grid_kwh"] = round(s.get("grid_kwh", 0), 2)
+                        c["solar_kwh"] = round(s.get("solar_kwh", 0), 2)
+                        c["battery_kwh"] = round(s.get("battery_kwh", 0), 2)
+                        c["grid_cost"] = round(s.get("grid_cost", 0), 2)
+                        c["battery_cost"] = round(s.get("battery_cost", 0), 2)
+                        c["actual_cost"] = round(s.get("actual_cost", 0), 2)
+                        c["full_rate_cost"] = round(s.get("full_rate_cost", 0), 2)
+                        c["total_cost"] = c["actual_cost"]  # what UI reads
                         c["avg_daily_cost"] = round(c["total_cost"] / days_count, 2)
+                        # NOTE: solar_savings here = full_rate - actual_cost,
+                        # which is solar-offset PLUS battery-arbitrage savings.
+                        # Field name is technically misleading (caught by
+                        # reviewer 2026-05-11) but renaming touches multiple
+                        # frontend consumers — left as-is with this note.
+                        c["solar_savings"] = round(s.get("solar_savings", 0), 2)
+                        # Per-period: cost from solar's per-hour per-TOU
+                        # accumulator (grid_cost + battery_cost = actual cost
+                        # of energy that flowed to this circuit in that TOU
+                        # bucket). Replaces the prior period-window-share
+                        # approximation.
+                        for period in ("peak", "part_peak", "off_peak"):
+                            src = (s.get("by_tou", {}) or {}).get(period, {})
+                            c.setdefault("by_tou", {}).setdefault(period, {})
+                            c["by_tou"][period]["kwh"] = round(src.get("kwh", 0), 2)
+                            c["by_tou"][period]["grid_kwh"] = round(
+                                src.get("grid_kwh", 0), 2
+                            )
+                            c["by_tou"][period]["cost"] = round(
+                                src.get("grid_cost", 0) + src.get("battery_cost", 0),
+                                2,
+                            )
+                except Exception as _ce:
+                    # Solar blend failed — leave existing circuit data alone
+                    # rather than corrupt with stale scaling.
+                    pass
     except Exception as _e:
         # Solar unconfigured or fetch failed — leave costs at gross retail
         pass

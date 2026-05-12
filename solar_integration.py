@@ -644,6 +644,12 @@ def blend_egauge_with_solar(egauge_hourly, solar_hourly):
             system["by_tou"][tou_period]["grid_export"] += grid_export_kwh
             system["by_tou"][tou_period]["battery_discharge"] += battery_discharge_kwh
             system["by_tou"][tou_period]["grid_cost"] += grid_import_cost
+            # WARNING: by_tou.<period>.battery_cost is amortized grid-charge
+            # cost of battery discharges during that period. DO NOT sum with
+            # by_tou.<period>.grid_cost in downstream code — that double-counts
+            # the grid → battery → home path. Use only as a per-period
+            # attribution detail, never as cash flow. (Same trap that produced
+            # the original $9.16 vs $5.91 net_cost bug 2026-05-11.)
             system["by_tou"][tou_period]["battery_cost"] += battery_discharge_cost
             system["by_tou"][tou_period]["export_credit"] += export_earn
         else:
@@ -672,9 +678,22 @@ def blend_egauge_with_solar(egauge_hourly, solar_hourly):
             stats["solar_kwh"] += circuit_solar_kwh
             stats["battery_kwh"] += circuit_battery_kwh
             stats["grid_cost"] += grid_cost
+            # WARNING: stats["battery_cost"] is the amortized grid-charge cost
+            # of energy this circuit consumed *from* battery. DO NOT sum it
+            # with stats["grid_cost"] elsewhere and call the result "what you
+            # paid the utility" — the original grid imports that charged the
+            # battery are already in stats["grid_cost"] when they happened.
+            # battery_cost is only meaningful as a per-circuit attribution of
+            # stored-energy use, NOT as cash flow.
             stats["battery_cost"] += bat_cost
             stats["actual_cost"] += grid_cost + bat_cost
             stats["full_rate_cost"] += full_cost
+            # NOTE: "solar_savings" is a misnomer — it's actually full_retail
+            # minus actual_cost, which captures BOTH solar offset AND battery
+            # arbitrage (peak displacement at off-peak prices). True solar-only
+            # savings = circuit_solar_kwh × rate. True arbitrage = battery_kwh
+            # × (rate − battery_cost_per_kwh). Kept as-is for backcompat with
+            # frontend; if you want solar-only, compute from solar_kwh × rate.
             stats["solar_savings"] += full_cost - (grid_cost + bat_cost)
 
             tou = stats["by_tou"][tou_period]
