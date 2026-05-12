@@ -555,25 +555,38 @@ def _build_history(days):
                 # imports already present at module level
                 from datetime import datetime as _dt_h
 
-                day_share = {}
+                # Per-day AND per-TOU grid_share. Previously this code used a
+                # single day-level grid_share, which over-stated peak cost on
+                # days where battery covered most/all of peak (a common pattern
+                # when the cap loop is healthy). User caught this 2026-05-11:
+                # "why does historical say we have $3 of peak usage today?"
+                # Today's truth: battery discharged 20.46 kWh during peak vs
+                # only 0.24 kWh from grid → real peak grid cost $0.14, not $2.72.
+                day_share = {}  # per-day overall, kept for backcompat
+                day_period_share = {}  # {(date, period): [grid_kwh, total_kwh]}
                 day_battery_kwh = {}
                 day_battery_avoided = {}
                 for (date_str, hour_int), h in solar_hourly.items():
                     grid_kwh = h.get("grid_import_kwh", 0) or 0
                     batt = h.get("battery_discharge_kwh", 0) or 0
                     sol = h.get("solar_kwh", 0) or 0
+                    period = get_tou_period(int(hour_int))
                     if date_str not in day_share:
                         day_share[date_str] = [0.0, 0.0]
                         day_battery_kwh[date_str] = 0.0
                         day_battery_avoided[date_str] = 0.0
                     day_share[date_str][0] += grid_kwh
                     day_share[date_str][1] += grid_kwh + batt + sol
+                    pkey = (date_str, period)
+                    if pkey not in day_period_share:
+                        day_period_share[pkey] = [0.0, 0.0]
+                    day_period_share[pkey][0] += grid_kwh
+                    day_period_share[pkey][1] += grid_kwh + batt + sol
                     day_battery_kwh[date_str] += batt
                     if batt > 0:
                         try:
                             d_obj = _dt_h.strptime(date_str, "%Y-%m-%d").date()
-                            tp = get_tou_period(int(hour_int))
-                            rate = get_rate(d_obj, tp)
+                            rate = get_rate(d_obj, period)
                             day_battery_avoided[date_str] += batt * rate
                         except Exception:
                             pass
@@ -581,20 +594,39 @@ def _build_history(days):
                     d: (g / max(0.001, total)) for d, (g, total) in day_share.items()
                 }
 
-                # Apply to daily entries
+                def _period_share(date_str, period):
+                    s = day_period_share.get((date_str, period))
+                    if s is None or s[1] <= 0:
+                        # No data for this period on this day — assume 100% grid
+                        return 1.0
+                    return s[0] / s[1]
+
+                # Apply to daily entries — per-TOU-period share so peak cost
+                # reflects what was ACTUALLY drawn from grid during peak hours,
+                # not the daily average grid_share applied to gross peak usage.
                 for d in daily:
-                    gs = day_grid_share.get(d.get("date"), 1.0)
-                    if gs < 1.0:
-                        d["total_cost"] = round(d["total_cost"] * gs, 2)
-                        d["peak_cost"] = round(d.get("peak_cost", 0) * gs, 2)
-                        d["off_peak_cost"] = round(d.get("off_peak_cost", 0) * gs, 2)
-                        d["part_peak_cost"] = round(d.get("part_peak_cost", 0) * gs, 2)
-                    d["battery_kwh"] = round(day_battery_kwh.get(d.get("date"), 0), 2)
+                    date = d.get("date")
+                    peak_share = _period_share(date, "peak")
+                    pp_share = _period_share(date, "part_peak")
+                    op_share = _period_share(date, "off_peak")
+                    d["peak_cost"] = round(d.get("peak_cost", 0) * peak_share, 2)
+                    d["part_peak_cost"] = round(
+                        d.get("part_peak_cost", 0) * pp_share, 2
+                    )
+                    d["off_peak_cost"] = round(d.get("off_peak_cost", 0) * op_share, 2)
+                    d["total_cost"] = round(
+                        d["peak_cost"] + d["part_peak_cost"] + d["off_peak_cost"], 2
+                    )
+                    d["battery_kwh"] = round(day_battery_kwh.get(date, 0), 2)
                     d["battery_avoided_cost"] = round(
-                        day_battery_avoided.get(d.get("date"), 0), 2
+                        day_battery_avoided.get(date, 0), 2
                     )
 
-                # Apply to circuit totals (use simple average grid_share over window)
+                # Apply to circuit totals (use simple average grid_share over window).
+                # NOTE: the frontend prefers solar-blended actual_cost from
+                # /api/solar when available, so these circuit costs are
+                # display-only fallbacks. A per-circuit per-TOU fix would be
+                # bigger; deferred.
                 if day_grid_share:
                     avg_share = sum(day_grid_share.values()) / len(day_grid_share)
                     for c in circuits:
