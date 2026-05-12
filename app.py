@@ -879,19 +879,52 @@ async def api_energy_flows(days: int = 7):
     bat_charge = float(data.get("battery_charge_kwh", 0) or 0)
     bat_discharge = float(data.get("battery_discharge_kwh", 0) or 0)
 
-    # Accounting (NEM 2 / self-power assumptions):
-    #   - Battery charges from solar surplus (clamped to available solar)
-    #   - Grid export comes from remaining solar surplus (after battery)
-    #   - What's left of solar covers home directly
-    #   - Battery discharge covers home
-    #   - Grid import covers remaining home load
-    # Numbers won't always balance perfectly because of round-trip
-    # efficiency loss + HA sensor granularity — that's normal.
-    solar_to_battery = min(bat_charge, solar)
-    solar_to_export = min(grid_export, max(0.0, solar - solar_to_battery))
-    solar_to_home = max(0.0, solar - solar_to_battery - solar_to_export)
-    battery_to_home = bat_discharge
-    grid_to_home = grid_import
+    # Per-hour accounting (aggregate math hides overnight grid-charging behind
+    # daytime solar surplus). For each hour:
+    #   - Solar covers home first, then absorbs into battery, then exports
+    #   - Grid covers remaining home load + remaining battery charge
+    # Then aggregate across hours.
+    solar_to_home = 0.0
+    solar_to_battery = 0.0
+    solar_to_export = 0.0
+    grid_to_home = 0.0
+    grid_to_battery = 0.0
+    battery_to_home = 0.0
+    for h in data.get("hourly", []):
+        s_h = float(h.get("solar_kwh", 0) or 0)
+        gi_h = float(h.get("grid_import_kwh", 0) or 0)
+        ge_h = float(h.get("grid_export_kwh", 0) or 0)
+        bc_h = float(h.get("battery_charge_kwh", 0) or 0)
+        bd_h = float(h.get("battery_discharge_kwh", 0) or 0)
+
+        # Solar absorbed by battery first (capped at solar and at bat_charge)
+        s2b = min(bc_h, s_h)
+        # Grid covers the rest of the battery charge
+        g2b = max(0.0, bc_h - s2b)
+        # Solar export = whatever the meter reports as export, capped at remaining solar
+        s2e = min(ge_h, max(0.0, s_h - s2b))
+        # Remaining solar covers home
+        s2h = max(0.0, s_h - s2b - s2e)
+        # Grid covers whatever home load grid_import reports minus the part that
+        # went to battery
+        g2h = max(0.0, gi_h - g2b)
+        b2h = bd_h
+
+        solar_to_battery += s2b
+        grid_to_battery += g2b
+        solar_to_export += s2e
+        solar_to_home += s2h
+        grid_to_home += g2h
+        battery_to_home += b2h
+
+    # Fallback if hourly is missing (older cached responses): aggregate math
+    if not data.get("hourly"):
+        solar_to_battery = min(bat_charge, solar)
+        grid_to_battery = max(0.0, bat_charge - solar_to_battery)
+        solar_to_export = min(grid_export, max(0.0, solar - solar_to_battery))
+        solar_to_home = max(0.0, solar - solar_to_battery - solar_to_export)
+        battery_to_home = bat_discharge
+        grid_to_home = max(0.0, grid_import - grid_to_battery)
 
     nodes = ["Solar", "Grid Import", "Battery", "Home", "Grid Export"]
     raw_links = [
@@ -900,6 +933,7 @@ async def api_energy_flows(days: int = 7):
         ("Solar", "Grid Export", solar_to_export),
         ("Battery", "Home", battery_to_home),
         ("Grid Import", "Home", grid_to_home),
+        ("Grid Import", "Battery", grid_to_battery),
     ]
     links = [
         {"source": s, "target": t, "value": round(v, 2)}
