@@ -907,9 +907,9 @@ tr:last-child td { border-bottom: none; }
 <div class="hero-band" style="justify-content:center;padding:14px 20px;display:flex;align-items:center;margin-bottom:16px">
   <div class="hero-flow" data-solar>
     <div class="flow-node solar"><span class="flow-label">Solar</span><span class="flow-val" id="solarW">--</span><span class="flow-unit">W</span></div>
-    <span class="flow-arrow">→</span>
+    <span class="flow-arrow" id="solarBatteryArrow">→</span>
     <div class="flow-node battery" id="batteryCard"><span class="flow-label">Battery</span><span class="flow-val" id="batteryW">--</span><span class="flow-unit">W</span><div class="soc-bar" style="margin-top:4px"><div class="fill" id="socFill" style="width:0%"></div></div><span class="flow-soc"><span id="socPct">--</span>%</span></div>
-    <span class="flow-arrow">→</span>
+    <span class="flow-arrow" id="batteryHomeArrow">→</span>
     <div class="flow-node home"><span class="flow-label">Home</span><span class="flow-val" id="homeW">--</span><span class="flow-unit">W</span></div>
     <span class="flow-arrow" id="homeGridArrow">→</span>
     <div class="flow-node grid" id="gridCard"><span class="flow-label">Grid</span><span class="flow-val" id="gridW">--</span><span class="flow-unit">W</span><span class="flow-soc" id="gridDir">--</span></div>
@@ -2041,6 +2041,24 @@ function updateLive(d) {
     gridDir.textContent = 'Idle';
     if (homeGridArrow) homeGridArrow.textContent = '·';
     gridCard.classList.remove('exporting');
+  }
+
+  // Solar→Battery and Battery→Home arrows: show · when no flow.
+  // Threshold matches the existing W formatter rounding (50W = noise floor).
+  const NOISE = 50;
+  const solarBatteryArrow = document.getElementById('solarBatteryArrow');
+  if (solarBatteryArrow) {
+    // Solar flows to battery only when battery is charging (battery_w < 0)
+    // AND solar is producing. If either is zero, no flow.
+    const charging = d.battery_w < -NOISE;
+    const solarUp = d.solar_w > NOISE;
+    solarBatteryArrow.textContent = (charging && solarUp) ? '→' : '·';
+  }
+  const batteryHomeArrow = document.getElementById('batteryHomeArrow');
+  if (batteryHomeArrow) {
+    // Battery feeds home when discharging (battery_w > 0).
+    // If solar covers home alone, this arrow is a dot.
+    batteryHomeArrow.textContent = d.battery_w > NOISE ? '→' : '·';
   }
 
   // Today stats — only update cost from live WS if we don't have solar-adjusted data yet

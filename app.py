@@ -555,87 +555,150 @@ def _build_history(days):
                 # imports already present at module level
                 from datetime import datetime as _dt_h
 
-                # Per-day AND per-TOU grid_share. Previously this code used a
-                # single day-level grid_share, which over-stated peak cost on
-                # days where battery covered most/all of peak (a common pattern
-                # when the cap loop is healthy). User caught this 2026-05-11:
-                # "why does historical say we have $3 of peak usage today?"
-                # Today's truth: battery discharged 20.46 kWh during peak vs
-                # only 0.24 kWh from grid → real peak grid cost $0.14, not $2.72.
-                day_share = {}  # per-day overall, kept for backcompat
-                day_period_share = {}  # {(date, period): [grid_kwh, total_kwh]}
+                # Compute per-day per-TOU grid cost DIRECTLY from per-hour
+                # data (grid_import × tou_rate), not via gross-retail × share.
+                # The share approximation under-counts because the denominator
+                # (grid + battery + solar) includes flows that did NOT go to
+                # home consumption (export surplus, grid-to-battery charging).
+                # That inflates the denominator, depresses the share, and
+                # under-counts the cost by 30-40% in the off-peak bucket.
+                #
+                # By summing actual grid imports × actual hourly TOU rate
+                # per (date, period), we get the same number /api/solar's
+                # by_tou.<period>.grid_cost computes — the two endpoints
+                # finally reconcile. (User caught the 40% off-peak under-count
+                # 2026-05-11; this is the structural fix.)
+                from solar_integration import get_export_credit as _gec
+
+                day_period_grid_cost = {}  # {(date, period): $}
+                day_period_export_credit = {}  # {(date, period): $}
+                day_period_grid_kwh = {}  # {(date, period): kWh imported}
+                day_period_home_kwh = {}  # {(date, period): kWh consumed at home}
+                day_share = {}  # kept for backcompat
                 day_battery_kwh = {}
                 day_battery_avoided = {}
                 for (date_str, hour_int), h in solar_hourly.items():
                     grid_kwh = h.get("grid_import_kwh", 0) or 0
+                    export_kwh = h.get("grid_export_kwh", 0) or 0
                     batt = h.get("battery_discharge_kwh", 0) or 0
                     sol = h.get("solar_kwh", 0) or 0
                     period = get_tou_period(int(hour_int))
+                    try:
+                        d_obj = _dt_h.strptime(date_str, "%Y-%m-%d").date()
+                        rate = get_rate(d_obj, period)
+                        credit = _gec(d_obj, period)
+                    except Exception:
+                        rate = 0.0
+                        credit = 0.0
+                    pkey = (date_str, period)
+                    day_period_grid_cost.setdefault(pkey, 0.0)
+                    day_period_grid_cost[pkey] += grid_kwh * rate
+                    day_period_export_credit.setdefault(pkey, 0.0)
+                    day_period_export_credit[pkey] += export_kwh * credit
+                    day_period_grid_kwh.setdefault(pkey, 0.0)
+                    day_period_grid_kwh[pkey] += grid_kwh
+                    day_period_home_kwh.setdefault(pkey, 0.0)
+                    # Best-effort hourly "home consumption": solar + battery + grid in,
+                    # minus export. Used only for per-TOU grid_share on circuits.
+                    day_period_home_kwh[pkey] += max(
+                        0.0, sol + batt + grid_kwh - export_kwh
+                    )
+                    # Per-day overall share (per-circuit fallback)
                     if date_str not in day_share:
                         day_share[date_str] = [0.0, 0.0]
                         day_battery_kwh[date_str] = 0.0
                         day_battery_avoided[date_str] = 0.0
                     day_share[date_str][0] += grid_kwh
                     day_share[date_str][1] += grid_kwh + batt + sol
-                    pkey = (date_str, period)
-                    if pkey not in day_period_share:
-                        day_period_share[pkey] = [0.0, 0.0]
-                    day_period_share[pkey][0] += grid_kwh
-                    day_period_share[pkey][1] += grid_kwh + batt + sol
                     day_battery_kwh[date_str] += batt
                     if batt > 0:
-                        try:
-                            d_obj = _dt_h.strptime(date_str, "%Y-%m-%d").date()
-                            rate = get_rate(d_obj, period)
-                            day_battery_avoided[date_str] += batt * rate
-                        except Exception:
-                            pass
+                        day_battery_avoided[date_str] += batt * rate
                 day_grid_share = {
                     d: (g / max(0.001, total)) for d, (g, total) in day_share.items()
                 }
 
+                # Per-circuit per-TOU grid_share (used to scale circuit by_tou
+                # costs to match what was actually drawn from grid in each TOU
+                # bucket). Reviewer flagged the prior version applied a single
+                # avg_share across all TOU periods, same bug as the daily one.
                 def _period_share(date_str, period):
-                    s = day_period_share.get((date_str, period))
-                    if s is None or s[1] <= 0:
-                        # No data for this period on this day — assume 100% grid
+                    g = day_period_grid_kwh.get((date_str, period), 0.0)
+                    h = day_period_home_kwh.get((date_str, period), 0.0)
+                    if h <= 0:
                         return 1.0
-                    return s[0] / s[1]
+                    return min(1.0, g / h)
 
-                # Apply to daily entries — per-TOU-period share so peak cost
-                # reflects what was ACTUALLY drawn from grid during peak hours,
-                # not the daily average grid_share applied to gross peak usage.
+                # Window-average grid_share PER TOU PERIOD (for circuit by_tou
+                # — circuits don't have date granularity in this aggregate).
+                period_window_share = {}
+                for period in ("peak", "part_peak", "off_peak"):
+                    g_sum = sum(
+                        v for (d, p), v in day_period_grid_kwh.items() if p == period
+                    )
+                    h_sum = sum(
+                        v for (d, p), v in day_period_home_kwh.items() if p == period
+                    )
+                    period_window_share[period] = (
+                        min(1.0, g_sum / h_sum) if h_sum > 0 else 1.0
+                    )
+
+                # Write per-day per-TOU costs DIRECTLY from solar_hourly.
+                # Bars now sum to solar's grid_cost; per-period numbers match
+                # /api/solar by_tou.<period>.grid_cost exactly.
                 for d in daily:
                     date = d.get("date")
-                    peak_share = _period_share(date, "peak")
-                    pp_share = _period_share(date, "part_peak")
-                    op_share = _period_share(date, "off_peak")
-                    d["peak_cost"] = round(d.get("peak_cost", 0) * peak_share, 2)
-                    d["part_peak_cost"] = round(
-                        d.get("part_peak_cost", 0) * pp_share, 2
+                    d["peak_cost"] = round(
+                        day_period_grid_cost.get((date, "peak"), 0), 2
                     )
-                    d["off_peak_cost"] = round(d.get("off_peak_cost", 0) * op_share, 2)
+                    d["part_peak_cost"] = round(
+                        day_period_grid_cost.get((date, "part_peak"), 0), 2
+                    )
+                    d["off_peak_cost"] = round(
+                        day_period_grid_cost.get((date, "off_peak"), 0), 2
+                    )
                     d["total_cost"] = round(
                         d["peak_cost"] + d["part_peak_cost"] + d["off_peak_cost"], 2
                     )
+                    d["export_credit"] = round(
+                        sum(
+                            day_period_export_credit.get((date, p), 0)
+                            for p in ("peak", "part_peak", "off_peak")
+                        ),
+                        2,
+                    )
+                    d["net_cost"] = round(d["total_cost"] - d["export_credit"], 2)
                     d["battery_kwh"] = round(day_battery_kwh.get(date, 0), 2)
                     d["battery_avoided_cost"] = round(
                         day_battery_avoided.get(date, 0), 2
                     )
 
-                # Apply to circuit totals (use simple average grid_share over window).
-                # NOTE: the frontend prefers solar-blended actual_cost from
-                # /api/solar when available, so these circuit costs are
-                # display-only fallbacks. A per-circuit per-TOU fix would be
-                # bigger; deferred.
+                # Apply per-TOU grid_share to per-circuit by_tou costs (was
+                # using a single window-average grid_share across all periods
+                # — same family as the daily bug, caught by reviewer 2026-05-11).
+                # The frontend prefers solar-blended actual_cost from /api/solar,
+                # so this mostly affects API consumers, but EV-charger-class
+                # circuits (off-peak-only) were being under-counted ~60% here.
                 if day_grid_share:
-                    avg_share = sum(day_grid_share.values()) / len(day_grid_share)
                     for c in circuits:
-                        c["total_cost"] = round(c["total_cost"] * avg_share, 2)
-                        c["avg_daily_cost"] = round(c["avg_daily_cost"] * avg_share, 2)
+                        # Per-circuit by_tou: use the per-TOU window grid_share.
+                        # Catches the EV-class bug: EV runs only off-peak (high
+                        # grid_share); old code applied the window-avg (~22%)
+                        # to all periods, so EV cost was 60% under-stated.
                         for period in c.get("by_tou", {}):
+                            share = period_window_share.get(period, 1.0)
                             c["by_tou"][period]["cost"] = round(
-                                c["by_tou"][period].get("cost", 0) * avg_share, 2
+                                c["by_tou"][period].get("cost", 0) * share, 2
                             )
+                        # Total cost = sum of per-period costs (internal
+                        # consistency). Previously total was scaled by a
+                        # different (window-avg) share, so total didn't equal
+                        # sum-of-periods. User caught this 2026-05-11.
+                        c["total_cost"] = round(
+                            sum(v.get("cost", 0) for v in c.get("by_tou", {}).values()),
+                            2,
+                        )
+                        days_count = max(1, len(daily))
+                        c["avg_daily_cost"] = round(c["total_cost"] / days_count, 2)
     except Exception as _e:
         # Solar unconfigured or fetch failed — leave costs at gross retail
         pass
@@ -807,12 +870,24 @@ def _build_solar(days, today_only=False):
 
     # Battery economics (from charge source attribution)
     if system.get("battery_cost_per_kwh") is not None:
-        # Compute value displaced: what battery discharge would cost at grid rates per TOU period
-        battery_value_displaced = 0
-        for period in ["peak", "part_peak", "off_peak"]:
-            discharge_kwh = system["by_tou"][period].get("battery_discharge", 0)
-            period_rate = get_rate(datetime.now(), period)
-            battery_value_displaced += discharge_kwh * period_rate
+        # Value displaced: what battery discharge would have cost at grid TOU
+        # rates if we'd bought it instead. Reviewer flagged 2026-05-11 that
+        # the prior code used `get_rate(datetime.now(), period)` for every
+        # hour, which means a 30-day window straddling Oct→summer→winter rate
+        # transitions priced ALL discharge at today's season. Fix: compute
+        # per-hour from hourly_source (which has the correct date) so summer
+        # discharge gets summer rates and vice-versa.
+        battery_value_displaced = 0.0
+        for h in hourly_source:
+            disch = h.get("battery_discharge_kwh", 0) or 0
+            if disch <= 0:
+                continue
+            try:
+                d_obj = datetime.strptime(h["date"], "%Y-%m-%d").date()
+                period = h.get("tou_period") or get_tou_period(int(h["hour"]))
+                battery_value_displaced += disch * get_rate(d_obj, period)
+            except Exception:
+                pass
 
         result["battery"] = {
             "cost_per_kwh": round(system["battery_cost_per_kwh"], 4),
