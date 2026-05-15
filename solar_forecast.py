@@ -370,11 +370,20 @@ def predict_loads(lookback_days=14, sunrise_hour=6, sunset_hour=19):
     )
     overnight_base = max(0, overnight_total - overnight_ev)
 
+    # Peak hours (4-9pm = 16-20 inclusive): what the BATTERY needs to cover.
+    # EV typically isn't charging during peak so peak load ≈ peak base.
+    PEAK_HOURS = list(range(16, 21))
+    peak_total = sum(avg_total[h] for h in PEAK_HOURS)
+    peak_ev = sum(avg_ev[h] for h in PEAK_HOURS)
+    peak_base = max(0, peak_total - peak_ev)
+
     return {
         "daytime_kwh": round(daytime_kwh, 1),
         "overnight_kwh": round(overnight_total, 1),
         "overnight_base_kwh": round(overnight_base, 1),
         "overnight_ev_kwh": round(overnight_ev, 1),
+        "peak_kwh": round(peak_total, 1),
+        "peak_base_kwh": round(peak_base, 1),
         "source": f"{lookback_days}d_avg",
         "lookback_days": lookback_days,
     }
@@ -459,11 +468,28 @@ def recommend_charge_cap():
     target_eod = cfg.get("solar", {}).get("target_end_of_day_pct", 1.0)
     target_cap_pct = target_eod - fill_pct_from_solar
 
-    # ── Floor: the SOC level we'll maintain overnight via grid charging ──
-    # ONLY backup_reserve + safety. Previously this added overnight_load_kwh
-    # which double-counted (battery enters night with energy from solar; we
-    # don't need to grid-charge to "reserve" energy we already have).
-    min_cap_pct = backup_reserve_pct / 100 + safety_margin
+    # ── Floor: SOC level we maintain overnight via grid charging ──
+    # User principle (2026-05-14): "Minimize battery grid charging, only
+    # needed if we think we won't cover next day's peak otherwise. Then
+    # just enough."
+    #
+    # Required sunset SOC (start of peak hours 4-9pm) to cover tomorrow's
+    # peak base load + leave backup_reserve afterwards:
+    #   required_sunset_kwh = peak_base_load + backup_reserve_kwh
+    #
+    # Battery's expected solar absorption tomorrow = solar_excess × efficiency.
+    # If solar absorption >= required_sunset - sunrise_floor: no overnight
+    # grid charge needed beyond reserve.
+    # Otherwise: cap = (required_sunset - solar_absorption) / capacity.
+    peak_base_load = loads.get("peak_base_kwh", 10.0)
+    backup_reserve_kwh = backup_reserve_pct / 100 * BATTERY_CAPACITY_KWH
+    required_sunset_kwh = peak_base_load + backup_reserve_kwh
+    # Battery absorbs at most `battery_in` from solar, capped by remaining room
+    # but if cap is low, room is large enough not to bind.
+    required_sunrise_kwh = max(0, required_sunset_kwh - battery_in)
+    required_sunrise_pct = required_sunrise_kwh / BATTERY_CAPACITY_KWH
+    hard_floor = backup_reserve_pct / 100 + safety_margin
+    min_cap_pct = max(hard_floor, required_sunrise_pct)
 
     chosen_cap_pct = max(min_cap_pct, target_cap_pct)
     chosen_cap_pct = min(1.0, max(0.05, chosen_cap_pct))
@@ -531,7 +557,16 @@ def recommend_charge_cap():
 
     # Decision reasoning
     if min_cap_pct > target_cap_pct:
-        reason_summary = f"FLOOR (backup_reserve {backup_reserve_pct}% + {int(safety_margin*100)}% safety)"
+        if required_sunrise_pct > hard_floor:
+            reason_summary = (
+                f"FLOOR (need {required_sunrise_pct*100:.0f}% at sunrise to cover "
+                f"~{peak_base_load:.0f} kWh peak)"
+            )
+        else:
+            reason_summary = (
+                f"FLOOR (backup_reserve {backup_reserve_pct}% + "
+                f"{int(safety_margin*100)}% safety)"
+            )
     else:
         reason_summary = "TARGET (solar excess fills battery to 99% by sunset)"
 

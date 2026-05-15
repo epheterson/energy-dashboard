@@ -1173,7 +1173,13 @@ async function refreshSummary() {
       document.getElementById('todayImportRate').textContent = rateStr;
       document.getElementById('todayExport').textContent = '↑ ' + exp.toFixed(1) + ' kWh';
 
-      const selfSuff = consumption > 0 ? Math.max(0, Math.min(100, Math.round(((consumption - imp) / consumption) * 100))) : 0;
+      // Self-sufficiency: use server-computed per-hour-precise value, NOT
+      // (consumption - import)/consumption which is wrong on grid-charging
+      // hours (counts grid-to-battery as if it went to home). User caught
+      // 2026-05-14: "Self sufficiency off by 10% is a lot".
+      const selfSuff = solarR.self_sufficiency_pct != null
+        ? Math.round(solarR.self_sufficiency_pct)
+        : 0;
       document.getElementById('todaySelfSuff').textContent = selfSuff + '%';
 
       // Status — be specific about *what kind* of import. Overnight off-peak
@@ -1555,8 +1561,12 @@ async function refreshGlance() {
     const solarToHomeKwh = Math.max(0, (solarR?.solar_kwh ?? 0) - (solarR?.grid_export_kwh ?? 0) - (solarR?.battery?.charge_kwh ?? 0));
 
     const consumptionKwh = solarR?.consumption_kwh ?? totalKwh;
-    let selfSuffPct = 0;
-    if (consumptionKwh > 0) {
+    // Use server-computed per-hour-precise self_sufficiency (the (consumption-imp)/consumption
+    // calculation below was wrong on grid-charging hours).
+    let selfSuffPct = solarR?.self_sufficiency_pct != null
+      ? Math.round(solarR.self_sufficiency_pct)
+      : 0;
+    if (consumptionKwh > 0 && solarR?.self_sufficiency_pct == null) {
       selfSuffPct = Math.max(0, Math.min(100, Math.round(((consumptionKwh - gridImportKwh) / consumptionKwh) * 100)));
     }
 

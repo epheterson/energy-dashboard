@@ -874,6 +874,40 @@ def _build_solar(days, today_only=False):
 
     full_rate_cost = round(sum(c["full_rate_cost"] for c in circuits), 2)
     net_cost = round(system["net_cost"], 2)
+
+    # Per-hour-precise home-source attribution (single source of truth — every
+    # consumer must read these instead of computing (consumption - import)
+    # which is wrong on grid-charging hours). Same per-hour logic the sankey
+    # uses in /api/energy-flows.
+    solar_to_home_kwh = 0.0
+    solar_to_battery_kwh = 0.0
+    solar_to_export_kwh = 0.0
+    grid_to_home_kwh = 0.0
+    grid_to_battery_kwh = 0.0
+    battery_to_home_kwh = 0.0
+    for h in hourly_source:
+        s_h = h.get("solar_kwh", 0) or 0
+        gi_h = h.get("grid_import_kwh", 0) or 0
+        ge_h = h.get("grid_export_kwh", 0) or 0
+        bc_h = h.get("battery_charge_kwh", 0) or 0
+        bd_h = h.get("battery_discharge_kwh", 0) or 0
+        s2b = min(bc_h, s_h)
+        g2b = max(0.0, bc_h - s2b)
+        s2e = min(ge_h, max(0.0, s_h - s2b))
+        s2h = max(0.0, s_h - s2b - s2e)
+        g2h = max(0.0, gi_h - g2b)
+        solar_to_home_kwh += s2h
+        solar_to_battery_kwh += s2b
+        solar_to_export_kwh += s2e
+        grid_to_home_kwh += g2h
+        grid_to_battery_kwh += g2b
+        battery_to_home_kwh += bd_h
+    home_total_kwh = solar_to_home_kwh + battery_to_home_kwh + grid_to_home_kwh
+    self_sufficiency_pct = round(
+        100.0 * (solar_to_home_kwh + battery_to_home_kwh) / max(0.001, home_total_kwh),
+        1,
+    )
+
     result = {
         "days": days,
         "solar_kwh": round(system["total_solar_kwh"], 2),
@@ -888,6 +922,23 @@ def _build_solar(days, today_only=False):
         "full_rate_cost": full_rate_cost,
         # System-level savings: what you'd pay without solar/battery minus what you actually pay
         "solar_savings": round(full_rate_cost - net_cost, 2),
+        # Per-hour-precise home-source flows. UI must read these instead of
+        # computing self-sufficiency naively. See note above.
+        "self_sufficiency_pct": self_sufficiency_pct,
+        "home_sources": {
+            "solar_kwh": round(solar_to_home_kwh, 2),
+            "battery_kwh": round(battery_to_home_kwh, 2),
+            "grid_kwh": round(grid_to_home_kwh, 2),
+            "total_kwh": round(home_total_kwh, 2),
+        },
+        "flows": {
+            "solar_to_home": round(solar_to_home_kwh, 2),
+            "solar_to_battery": round(solar_to_battery_kwh, 2),
+            "solar_to_export": round(solar_to_export_kwh, 2),
+            "grid_to_home": round(grid_to_home_kwh, 2),
+            "grid_to_battery": round(grid_to_battery_kwh, 2),
+            "battery_to_home": round(battery_to_home_kwh, 2),
+        },
         "circuits": circuits,
         "hourly": hourly_source,
         "by_tou": {
