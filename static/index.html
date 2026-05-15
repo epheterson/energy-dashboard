@@ -1707,6 +1707,7 @@ setInterval(refreshGlance, 60000);
   </div>
   <div class="panel-body" style="padding:14px 20px">
     <div id="sankey-chart" style="width:100%;min-height:260px;overflow-x:auto"></div>
+    <div id="batteryFlowDetail" style="margin-top:10px;padding:10px 14px;border-top:0.5px solid var(--border);font-size:var(--fs-sm);color:var(--text-muted);font-variant-numeric:tabular-nums;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;display:none"></div>
   </div>
 </div>
 
@@ -2029,6 +2030,14 @@ function updateLive(d) {
   setSmart('gridW', Math.abs(d.grid_w));
   document.getElementById('socPct').textContent = d.battery_soc.toFixed(0);
   document.getElementById('socFill').style.width = d.battery_soc + '%';
+  // Stash SOC globally so async renderers (Sankey detail box, insight bar,
+  // anything that paints before the WS arrives) can read it without waiting.
+  window._latestBatterySoc = d.battery_soc;
+  // Re-render battery flow detail now that we have fresh SOC. The Sankey
+  // itself doesn't need redrawing — just the state line below it.
+  if (window._lastSankeyData && typeof renderBatteryFlowDetail === 'function') {
+    renderBatteryFlowDetail(window._lastSankeyData);
+  }
 
   // Battery direction (positive = discharging to home, negative = charging)
   const batCard = document.getElementById('batteryCard');
@@ -2833,6 +2842,28 @@ function drawEnergyFlowSankey(d) {
     .append('title')
     .text(l => `${l.source.name} → ${l.target.name}: ${l.value.toFixed(1)} kWh`);
 
+  // Link labels — show kWh value at midpoint of each stream so user doesn't
+  // have to hover to see "what went into battery" / "what came back out".
+  // Hide for tiny streams (<5% of largest) to reduce clutter.
+  const biggest = Math.max(...graph.links.map(l => l.value));
+  svg.append('g').selectAll('text.link-label')
+    .data(graph.links.filter(l => l.value >= biggest * 0.05))
+    .join('text')
+    .attr('class', 'link-label')
+    .attr('x', l => (l.source.x1 + l.target.x0) / 2)
+    .attr('y', l => (l.y0 + l.y1) / 2)
+    .attr('dy', '0.35em')
+    .attr('text-anchor', 'middle')
+    .attr('fill', '#e5e7eb')
+    .attr('paint-order', 'stroke')
+    .attr('stroke', 'rgba(15,18,28,0.95)')
+    .attr('stroke-width', 3)
+    .style('font-size', '10px')
+    .style('font-weight', '500')
+    .style('font-family', 'ui-monospace,SFMono-Regular,Menlo,monospace')
+    .style('font-variant-numeric', 'tabular-nums')
+    .text(l => `${l.value.toFixed(0)} kWh`);
+
   // Nodes
   svg.append('g').selectAll('rect')
     .data(graph.nodes)
@@ -2846,19 +2877,77 @@ function drawEnergyFlowSankey(d) {
     .append('title')
     .text(n => `${n.name}: ${n.value.toFixed(1)} kWh`);
 
-  // Labels — outside-the-rect, side based on column position
-  svg.append('g').selectAll('text')
+  // Node labels — outside-the-rect, side based on column position
+  svg.append('g').selectAll('text.node-label')
     .data(graph.nodes)
     .join('text')
+    .attr('class', 'node-label')
     .attr('x', n => n.x0 < width / 2 ? n.x1 + 6 : n.x0 - 6)
     .attr('y', n => (n.y0 + n.y1) / 2)
     .attr('dy', '0.35em')
     .attr('text-anchor', n => n.x0 < width / 2 ? 'start' : 'end')
     .attr('fill', '#cbd5e1')
+    .attr('paint-order', 'stroke')
+    .attr('stroke', 'rgba(15,18,28,0.95)')
+    .attr('stroke-width', 3)
     .style('font-size', '11px')
     .style('font-family', 'ui-monospace,SFMono-Regular,Menlo,monospace')
     .style('font-variant-numeric', 'tabular-nums')
     .text(n => `${n.name} · ${n.value.toFixed(0)} kWh`);
+
+  // Battery detail re-renders when SOC arrives via WS — cache the sankey
+  // payload so the WS handler can refresh state line without redrawing chart.
+  window._lastSankeyData = d;
+  renderBatteryFlowDetail(d);
+}
+
+function renderBatteryFlowDetail(d) {
+  if (!d || !d.links) return;
+  try {
+    const linkBy = {};
+    for (const l of d.links) linkBy[`${l.source}→${l.target}`] = l.value;
+    const solarToBattery = linkBy['Solar→Battery'] || 0;
+    const gridToBattery = linkBy['Grid Import→Battery'] || 0;
+    const batteryToHome = linkBy['Battery→Home'] || 0;
+    const inTotal = solarToBattery + gridToBattery;
+    const loss = Math.max(0, inTotal - batteryToHome);
+    const eff = inTotal > 0 ? (batteryToHome / inTotal * 100) : null;
+    let socPct = (typeof window._latestBatterySoc === 'number') ? window._latestBatterySoc : null;
+    if (socPct == null) {
+      const socEl = document.getElementById('socPct');
+      const v = socEl ? parseFloat(socEl.textContent) : NaN;
+      socPct = isNaN(v) ? null : v;
+    }
+    const capacityKwh = 40.5;
+    const reservePct = 20;
+    const stored = socPct != null ? (socPct / 100 * capacityKwh) : null;
+    const usable = stored != null ? Math.max(0, stored - reservePct/100 * capacityKwh) : null;
+    const detail = document.getElementById('batteryFlowDetail');
+    if (!detail) return;
+    while (detail.firstChild) detail.removeChild(detail.firstChild);
+    const _strong = (t) => { const s = document.createElement('strong'); s.textContent = t; return s; };
+    const _txt = (t) => document.createTextNode(t);
+    detail.appendChild(_strong(`battery flow (${d.days}d):`));
+    detail.appendChild(_txt(
+      ` solar ${solarToBattery.toFixed(0)} + grid ${gridToBattery.toFixed(0)} = ${inTotal.toFixed(0)} kWh in · ` +
+      `${batteryToHome.toFixed(0)} kWh out · ` +
+      `${loss.toFixed(1)} kWh loss` +
+      (eff != null ? ` (${eff.toFixed(0)}% efficiency)` : '')
+    ));
+    detail.appendChild(document.createElement('br'));
+    if (socPct != null) {
+      detail.appendChild(_strong('state:'));
+      detail.appendChild(_txt(
+        ` ${socPct.toFixed(0)}% SOC (${stored.toFixed(1)} kWh stored, ` +
+        `${usable.toFixed(1)} kWh usable above ${reservePct}% reserve) · ` +
+        `${capacityKwh} kWh capacity (3 × Powerwall 2)`
+      ));
+    } else {
+      detail.appendChild(_strong('capacity:'));
+      detail.appendChild(_txt(` ${capacityKwh} kWh (3 × Powerwall 2) · reserve ${reservePct}%`));
+    }
+    detail.style.display = 'block';
+  } catch (_) {}
 }
 
 // Initial load + reload on window resize
