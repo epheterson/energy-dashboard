@@ -380,27 +380,69 @@ def predict_loads(lookback_days=14, sunrise_hour=6, sunset_hour=19):
     }
 
 
+def _get_current_soc_pct():
+    """Fetch current battery SOC % from HA. None if unavailable."""
+    try:
+        import os
+        import subprocess
+
+        ha_url = os.environ.get("HA_URL", "")
+        ha_token = os.environ.get("HA_TOKEN", "")
+        if not ha_url or not ha_token:
+            return None
+        result = subprocess.run(
+            [
+                "curl",
+                "-s",
+                "-m",
+                "5",
+                "-H",
+                f"Authorization: Bearer {ha_token}",
+                f"{ha_url}/api/states/sensor.solar_power_plant_percentage_charged",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=8,
+        )
+        data = json.loads(result.stdout)
+        return float(data.get("state"))
+    except Exception:
+        return None
+
+
 def recommend_charge_cap():
-    """Calculate recommended grid charge cap to maximize self-sufficiency.
+    """Calculate recommended grid charge cap to minimize total daily cost.
 
-    Goal: battery hits ~99% at sunset (NOT 100% — leaves headroom for solar
-    all day). Minimize export. Minimize overnight grid import.
+    Goal: battery hits ~99% at sunset, but ONLY via solar. Don't grid-charge
+    overnight unless the battery genuinely won't make it to backup_reserve
+    by sunrise. Grid charging when not needed is net-negative:
 
-    Math:
-      solar_excess = max(0, predicted_solar - predicted_daytime_load)
-      battery_in_from_solar = solar_excess * efficiency
-      target_cap = 0.99 - battery_in_from_solar / capacity
-      floor_cap = (predicted_overnight_load / efficiency) / capacity + safety_margin
-      recommended_cap = clamp(max(target_cap, floor_cap), 0.05, 1.0)
+      −$0.36 spent on grid-charge
+      +$0.12 recovered when displaced solar exports tomorrow
+      = −$0.24 net loss per unnecessary kWh
 
-    Returns dict with recommendation + reasoning + ALL inputs for transparency.
+    Math (timing referenced to midnight, NOT call-time):
+      sunrise_soc_kwh = current_soc_kwh - drain(now → sunrise)
+      cap_floor = backup_reserve_pct + safety_margin   # the hard SOC floor
+      cap_target = target_eod - solar_excess × efficiency / capacity
+      cap = max(cap_floor, cap_target)
+
+    The cap_floor is the SOC level we MAINTAIN overnight via grid charging.
+    If battery's predicted sunrise SOC is already above the floor (because
+    we ended today high from solar), the floor never triggers — no overnight
+    grid charge happens. Previous formula treated overnight_load_kwh as
+    "must reserve this in battery at sunset", which forced grid-charging
+    even when battery was naturally well-supplied.
     """
-    from datetime import datetime
+    from datetime import datetime, timedelta
     from config import get_config
 
     cfg = get_config()
     efficiency = cfg.get("solar", {}).get("battery_efficiency", 0.90)
-    safety_margin = 0.05  # 5% buffer above predicted overnight load
+    safety_margin = 0.05
+    backup_reserve_pct = cfg.get("solar", {}).get(
+        "backup_reserve_pct", BACKUP_RESERVE_PCT
+    )
 
     prediction = predict_solar_production()
     predicted_solar = prediction["predicted_solar_kwh"]
@@ -409,40 +451,87 @@ def recommend_charge_cap():
     overnight_load = loads["overnight_kwh"]
     overnight_base_load = loads.get("overnight_base_kwh", overnight_load)
 
-    # How much solar is left over after covering daytime load? That goes to battery.
+    # ── Solar absorption potential ──
     solar_excess = max(0, predicted_solar - daytime_load)
     battery_in = solar_excess * efficiency
     fill_pct_from_solar = battery_in / BATTERY_CAPACITY_KWH
 
-    # Target cap: battery hits 0.99 at sunset
-    # End-of-day target: 1.0 = zero-export goal. Configurable via solar.target_end_of_day_pct.
-    # Caveat: targeting 1.0 means battery may hit 100% early if forecast underpredicts solar
-    # (then exports excess). 0.99 leaves a small buffer at cost of always exporting ~1% capacity.
     target_eod = cfg.get("solar", {}).get("target_end_of_day_pct", 1.0)
     target_cap_pct = target_eod - fill_pct_from_solar
 
-    # Floor cap: battery must have enough for overnight + safety
-    # Floor uses BASE overnight load only — EV charging draws from grid directly,
-    # not from Powerwall (default Tesla behavior).
-    min_cap_pct = (
-        overnight_base_load / efficiency
-    ) / BATTERY_CAPACITY_KWH + safety_margin
+    # ── Floor: the SOC level we'll maintain overnight via grid charging ──
+    # ONLY backup_reserve + safety. Previously this added overnight_load_kwh
+    # which double-counted (battery enters night with energy from solar; we
+    # don't need to grid-charge to "reserve" energy we already have).
+    min_cap_pct = backup_reserve_pct / 100 + safety_margin
 
     chosen_cap_pct = max(min_cap_pct, target_cap_pct)
     chosen_cap_pct = min(1.0, max(0.05, chosen_cap_pct))
     recommended_cap = int(chosen_cap_pct * 100)
 
-    # Predicted outcome
-    predicted_export_kwh = max(
-        0, solar_excess - (BATTERY_CAPACITY_KWH * (1 - chosen_cap_pct)) / efficiency
+    # ── Project the day cycle from current SOC for transparency + accurate
+    # predicted-grid-import calc ──
+    # Reference point is MIDNIGHT, not call-time (the function gets called
+    # every hour by HA polling; using "now" makes the prediction unstable).
+    current_soc_pct = _get_current_soc_pct()
+    now = datetime.now()
+    midnight = (now + timedelta(days=1)).replace(
+        hour=0, minute=0, second=0, microsecond=0
     )
-    predicted_overnight_grid_import_kwh = max(
-        0, overnight_load - chosen_cap_pct * BATTERY_CAPACITY_KWH * efficiency
-    )
+    sunrise = midnight.replace(hour=6)
+    sunset = midnight.replace(hour=18)
+    next_midnight = midnight + timedelta(days=1)
+    hours_to_midnight = max(0, (midnight - now).total_seconds() / 3600)
+
+    if current_soc_pct is not None:
+        soc_now_kwh = current_soc_pct / 100 * BATTERY_CAPACITY_KWH
+        # Evening drain: rough — overnight_base spread over 12 hr night
+        eve_drain_per_hr = overnight_base_load / 12
+        eve_drain = eve_drain_per_hr * hours_to_midnight
+        midnight_soc_kwh = max(0, soc_now_kwh - eve_drain)
+        # Midnight → sunrise: rest of overnight base load (~6 hrs)
+        sunrise_drain = overnight_base_load * (6 / 12)
+        natural_sunrise_kwh = max(0, midnight_soc_kwh - sunrise_drain)
+        # Cap kicks in if natural sunrise SOC < cap level
+        cap_kwh = chosen_cap_pct * BATTERY_CAPACITY_KWH
+        if natural_sunrise_kwh < cap_kwh:
+            overnight_grid_charge_kwh = (cap_kwh - natural_sunrise_kwh) / efficiency
+            sunrise_soc_kwh = cap_kwh
+        else:
+            overnight_grid_charge_kwh = 0.0
+            sunrise_soc_kwh = natural_sunrise_kwh
+        # Daytime: battery absorbs solar up to 100%
+        room_for_solar_kwh = BATTERY_CAPACITY_KWH - sunrise_soc_kwh
+        solar_to_battery_kwh = min(battery_in, room_for_solar_kwh)
+        sunset_soc_kwh = sunrise_soc_kwh + solar_to_battery_kwh
+        predicted_export_kwh = max(0, solar_excess - solar_to_battery_kwh / efficiency)
+        predicted_overnight_grid_import_kwh = overnight_grid_charge_kwh
+        modeled = {
+            "current_soc_pct": round(current_soc_pct, 1),
+            "midnight_soc_pct": round(midnight_soc_kwh / BATTERY_CAPACITY_KWH * 100, 1),
+            "natural_sunrise_soc_pct": round(
+                natural_sunrise_kwh / BATTERY_CAPACITY_KWH * 100, 1
+            ),
+            "post_charge_sunrise_soc_pct": round(
+                sunrise_soc_kwh / BATTERY_CAPACITY_KWH * 100, 1
+            ),
+            "sunset_soc_pct": round(sunset_soc_kwh / BATTERY_CAPACITY_KWH * 100, 1),
+        }
+    else:
+        # No HA reading available — fall back to old aggregate math
+        predicted_export_kwh = max(
+            0,
+            solar_excess - (BATTERY_CAPACITY_KWH * (1 - chosen_cap_pct)) / efficiency,
+        )
+        predicted_overnight_grid_import_kwh = max(
+            0,
+            overnight_load - chosen_cap_pct * BATTERY_CAPACITY_KWH * efficiency,
+        )
+        modeled = {"current_soc_pct": None, "note": "HA unreachable; aggregate math"}
 
     # Decision reasoning
     if min_cap_pct > target_cap_pct:
-        reason_summary = "FLOOR (overnight load drives cap)"
+        reason_summary = f"FLOOR (backup_reserve {backup_reserve_pct}% + {int(safety_margin*100)}% safety)"
     else:
         reason_summary = "TARGET (solar excess fills battery to 99% by sunset)"
 
@@ -462,16 +551,22 @@ def recommend_charge_cap():
         "reasoning_mode": reason_summary,
         "battery_efficiency": efficiency,
         "battery_capacity_kwh": BATTERY_CAPACITY_KWH,
+        "modeled": modeled,
         "reasoning": (
             f"Tomorrow: {prediction['cloud_cover_pct']:.0f}% cloud, "
             f"~{predicted_solar:.0f} kWh solar predicted. "
             f"Daytime load ~{daytime_load:.0f} kWh, overnight load ~{overnight_load:.0f} kWh. "
-            f"Solar excess ~{solar_excess:.0f} kWh → ~{battery_in:.0f} kWh into battery (after {efficiency*100:.0f}% rt). "
-            f"Cap target: {target_cap_pct*100:.0f}% (hit 99% at sunset). "
-            f"Cap floor: {min_cap_pct*100:.0f}% (overnight need). "
+            f"Solar excess ~{solar_excess:.0f} kWh → ~{battery_in:.0f} kWh into battery (after {efficiency * 100:.0f}% rt). "
+            f"Cap target: {target_cap_pct * 100:.0f}% (hit 99% at sunset). "
+            f"Cap floor: {min_cap_pct * 100:.0f}% (backup_reserve {backup_reserve_pct}% + safety). "
             f"Recommend: {recommended_cap}% [{reason_summary}]. "
             f"Predicted export: {predicted_export_kwh:.1f} kWh. "
             f"Predicted overnight grid import: {predicted_overnight_grid_import_kwh:.1f} kWh."
+            + (
+                f" SOC trajectory: now {modeled['current_soc_pct']:.0f}% → midnight {modeled.get('midnight_soc_pct', '?')}% → sunrise {modeled.get('post_charge_sunrise_soc_pct', '?')}% → sunset {modeled.get('sunset_soc_pct', '?')}%."
+                if modeled.get("current_soc_pct") is not None
+                else ""
+            )
         ),
     }
 
