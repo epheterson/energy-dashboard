@@ -2771,7 +2771,7 @@ async function loadEnergyFlows(days, btn) {
     }
     const t = d.totals || {};
     document.getElementById('energyFlowSummary').textContent =
-      `${t.self_sufficiency_pct ?? '--'}% self-sufficient · ${t.home_consumption_kwh ?? '--'} kWh home · ${t.grid_export_kwh ?? '--'} kWh exported`;
+      `${t.self_sufficiency_pct ?? '--'}% self-sufficient · ${t.home_consumption_kwh ?? '--'} kWh home${t.ev_consumption_kwh ? ' · ' + t.ev_consumption_kwh + ' kWh EV' : ''} · ${t.grid_export_kwh ?? '--'} kWh exported`;
     drawEnergyFlowSankey(d);
   } catch (e) {
     console.warn('energy flows error', e);
@@ -2806,6 +2806,7 @@ function drawEnergyFlowSankey(d) {
     'Grid Import': 'var(--red)',
     'Battery': 'var(--green)',
     'Home': '#6366f1',
+    'EV': '#a855f7',
     'Grid Export': '#5eead4',
   };
   const linkColors = {
@@ -3158,7 +3159,7 @@ loadEnergyFlows = async function(days, btn) {
     window._energyFlowLastData = d;
     const t = d.totals || {};
     document.getElementById('energyFlowSummary').textContent =
-      `${t.self_sufficiency_pct ?? '--'}% self-sufficient · ${t.home_consumption_kwh ?? '--'} kWh home · ${t.grid_export_kwh ?? '--'} kWh exported`;
+      `${t.self_sufficiency_pct ?? '--'}% self-sufficient · ${t.home_consumption_kwh ?? '--'} kWh home${t.ev_consumption_kwh ? ' · ' + t.ev_consumption_kwh + ' kWh EV' : ''} · ${t.grid_export_kwh ?? '--'} kWh exported`;
     drawEnergyFlowSankey(d);
   } catch (e) {
     console.warn('energy flows error', e);

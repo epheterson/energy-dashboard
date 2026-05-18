@@ -1121,7 +1121,32 @@ async def api_energy_flows(days: int = 7):
         battery_to_home = bat_discharge
         grid_to_home = max(0.0, grid_import - grid_to_battery)
 
+    # Split EV charging out of Home using per-circuit solar attribution.
+    # The EV Charger eGauge circuit aggregates over the window into
+    # solar_kwh/grid_kwh/battery_kwh — subtract those from the Home flows so
+    # the sankey shows where EV power came from separately.
+    ev_solar_to = 0.0
+    ev_grid_to = 0.0
+    ev_battery_to = 0.0
+    for sc in data.get("circuits", []) or []:
+        if sc.get("name") == "EV Charger":
+            ev_solar_to = float(sc.get("solar_kwh", 0) or 0)
+            ev_grid_to = float(sc.get("grid_kwh", 0) or 0)
+            ev_battery_to = float(sc.get("battery_kwh", 0) or 0)
+            break
+    # Clamp subtractions so we never go negative if attribution disagrees with
+    # per-hour aggregates at the edges.
+    ev_solar_to = min(ev_solar_to, solar_to_home)
+    ev_grid_to = min(ev_grid_to, grid_to_home)
+    ev_battery_to = min(ev_battery_to, battery_to_home)
+    solar_to_home -= ev_solar_to
+    grid_to_home -= ev_grid_to
+    battery_to_home -= ev_battery_to
+    has_ev = (ev_solar_to + ev_grid_to + ev_battery_to) > 0.5
+
     nodes = ["Solar", "Grid Import", "Battery", "Home", "Grid Export"]
+    if has_ev:
+        nodes.insert(4, "EV")  # between Home and Grid Export
     raw_links = [
         ("Solar", "Home", solar_to_home),
         ("Solar", "Battery", solar_to_battery),
@@ -1130,6 +1155,12 @@ async def api_energy_flows(days: int = 7):
         ("Grid Import", "Home", grid_to_home),
         ("Grid Import", "Battery", grid_to_battery),
     ]
+    if has_ev:
+        raw_links += [
+            ("Solar", "EV", ev_solar_to),
+            ("Grid Import", "EV", ev_grid_to),
+            ("Battery", "EV", ev_battery_to),
+        ]
     links = [
         {"source": s, "target": t, "value": round(v, 2)}
         for s, t, v in raw_links
@@ -1137,6 +1168,7 @@ async def api_energy_flows(days: int = 7):
     ]
 
     home_total = solar_to_home + battery_to_home + grid_to_home
+    ev_total = ev_solar_to + ev_grid_to + ev_battery_to
     return {
         "days": days,
         "nodes": nodes,
@@ -1148,8 +1180,12 @@ async def api_energy_flows(days: int = 7):
             "battery_charge_kwh": round(bat_charge, 2),
             "battery_discharge_kwh": round(bat_discharge, 2),
             "home_consumption_kwh": round(home_total, 2),
+            "ev_consumption_kwh": round(ev_total, 2),
             "self_sufficiency_pct": round(
-                100.0 * (solar_to_home + battery_to_home) / max(0.001, home_total), 1
+                100.0
+                * (solar_to_home + battery_to_home + ev_solar_to + ev_battery_to)
+                / max(0.001, home_total + ev_total),
+                1,
             ),
         },
     }
