@@ -2100,22 +2100,39 @@ function updateLive(d) {
     gridCard.classList.remove('exporting');
   }
 
-  // Solar→Battery and Battery→Home arrows: show · when no flow.
-  // Threshold matches the existing W formatter rounding (50W = noise floor).
+  // Hero arrows show the *bus direction* of energy at each junction, not a
+  // specific source→sink transaction. Conventions:
+  //   solar_w  > 0  → solar producing (rightward at solar→battery boundary)
+  //   battery_w > 0 → battery DISCHARGING (rightward at battery→home boundary)
+  //   battery_w < 0 → battery CHARGING (leftward absorption at that boundary)
+  //   grid_w   > 0 → importing (leftward at home→grid boundary)
+  //   grid_w   < 0 → exporting (rightward at home→grid boundary)
   const NOISE = 50;
   const solarBatteryArrow = document.getElementById('solarBatteryArrow');
   if (solarBatteryArrow) {
-    // Solar flows to battery only when battery is charging (battery_w < 0)
-    // AND solar is producing. If either is zero, no flow.
-    const charging = d.battery_w < -NOISE;
-    const solarUp = d.solar_w > NOISE;
-    solarBatteryArrow.textContent = (charging && solarUp) ? '→' : '·';
+    // → whenever solar is producing — that energy is flowing rightward
+    // through the system whether it lands in the battery, home, or grid.
+    // Previous logic only fired when battery was charging from solar, which
+    // hid the export pathway (solar→home→grid).
+    solarBatteryArrow.textContent = d.solar_w > NOISE ? '→' : '·';
   }
   const batteryHomeArrow = document.getElementById('batteryHomeArrow');
   if (batteryHomeArrow) {
-    // Battery feeds home when discharging (battery_w > 0).
-    // If solar covers home alone, this arrow is a dot.
-    batteryHomeArrow.textContent = d.battery_w > NOISE ? '→' : '·';
+    // → if battery is discharging (energy flows rightward toward home/grid)
+    //   or if solar is flowing past a non-charging battery toward home/grid.
+    // ← if battery is being charged from the home/grid side (grid charging).
+    // · if no net horizontal flow at this junction.
+    if (d.battery_w > NOISE) {
+      batteryHomeArrow.textContent = '→';
+    } else if (d.battery_w < -NOISE && d.solar_w <= NOISE) {
+      // Battery charging with no solar → energy coming from the right (grid)
+      batteryHomeArrow.textContent = '←';
+    } else if (d.solar_w > NOISE) {
+      // Solar producing → flowing rightward past idle/slow-charging battery
+      batteryHomeArrow.textContent = '→';
+    } else {
+      batteryHomeArrow.textContent = '·';
+    }
   }
 
   // Today stats — only update cost from live WS if we don't have solar-adjusted data yet
