@@ -1085,7 +1085,7 @@ tr:last-child td { border-bottom: none; }
     </div>
     <div class="sc-stats">
       <div class="sc-stat">
-        <div class="v" id="tomorrowCloud">☁ --%</div>
+        <div class="v" id="tomorrowCloud">Cloud --%</div>
         <div class="l">cloud · from NWS</div>
       </div>
       <div class="sc-stat">
@@ -1225,9 +1225,9 @@ async function refreshSummary() {
       const predImp = capR.predicted_overnight_grid_import_kwh;
 
       document.getElementById('tomorrowCap').textContent = cap + '%';
-      document.getElementById('tomorrowCloud').textContent = '☁ ' + (cloud != null ? cloud.toFixed(0) : '--') + '%';
+      document.getElementById('tomorrowCloud').textContent = 'Cloud ' + (cloud != null ? cloud.toFixed(0) : '--') + '%';
       document.getElementById('tomorrowSolar').textContent = (solar != null ? solar.toFixed(0) : '--') + ' kWh';
-      document.getElementById('tomorrowPeakSrc').textContent = peakSrc === 'observed' ? 'calibrated ✓' : 'from table';
+      document.getElementById('tomorrowPeakSrc').textContent = peakSrc === 'observed' ? 'calibrated' : 'from table';
       document.getElementById('tomorrowExp').textContent = (predExp != null ? predExp.toFixed(1) : '--') + ' kWh';
       document.getElementById('tomorrowImp').textContent = (predImp != null ? predImp.toFixed(1) : '--') + ' kWh';
 
@@ -1573,7 +1573,7 @@ async function refreshGlance() {
     // Status — compare today's grid import vs today's consumption (same window)
     const todayConsumption = solarR?.consumption_kwh ?? totalKwh;
     let dotClass = 'dot';
-    let headline = '✓ Self-sufficient today';
+    let headline = 'Self-sufficient today';
     if (gridImportKwh > todayConsumption * 0.4) { dotClass = 'dot bad'; headline = 'Heavy grid import today'; }
     else if (gridImportKwh > 1) { dotClass = 'dot warn'; headline = 'Some grid import today'; }
 
@@ -1707,7 +1707,12 @@ setInterval(refreshGlance, 60000);
   </div>
   <div class="panel-body" style="padding:14px 20px">
     <div id="sankey-chart" style="width:100%;min-height:260px;overflow-x:auto"></div>
-    <div id="batteryFlowDetail" style="margin-top:10px;padding:10px 14px;border-top:0.5px solid var(--border);font-size:var(--fs-sm);color:var(--text-muted);font-variant-numeric:tabular-nums;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;display:none"></div>
+    <div id="batteryDetailToggle" onclick="toggleBatteryDetail()" style="display:none;margin-top:8px;padding:6px 14px;border-top:0.5px solid var(--border);font-size:var(--fs-xs);color:var(--text-muted);cursor:pointer;user-select:none;display:flex;align-items:center;gap:6px">
+      <span id="batteryDetailChevron" style="transition:transform 0.15s">&#9654;</span>
+      <span>Battery details</span>
+      <span id="batteryDetailSummary" style="margin-left:auto;color:var(--text-muted);font-variant-numeric:tabular-nums"></span>
+    </div>
+    <div id="batteryFlowDetail" style="margin-top:0;padding:8px 14px 10px;font-size:var(--fs-sm);color:var(--text-muted);font-variant-numeric:tabular-nums;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;display:none"></div>
   </div>
 </div>
 
@@ -2150,83 +2155,82 @@ function updateInsight(d, mix) {
   const exportCredit = (d.export_credits || {})[period] || 0.12;
   const periodLabel = (period || 'off_peak').replace('_', '-');
 
-  // Pick the most useful single narrative for the current state.
-  // Priority: anything *expensive* or *unusual* first, then ideal-state confirmation.
-  let ico, parts;
+  // Pick the most useful single narrative for current state.
+  // Priority: expensive/unusual first, then ideal-state confirmation.
+  // No emojis. SOC and solar context determine framing \u2014 e.g., a small
+  // grid trickle to a 96% battery isn't "grid charging", it's "near full".
+  let parts;
+  const SOC_NEAR_FULL = 92;  // above this, "near full" framing dominates
 
   if (grid > 500 && period === 'peak') {
-    // Importing during peak rates \u2014 urgent
-    ico = '\u26A0\uFE0F'; // \u26A0\uFE0F
+    // Importing during peak \u2014 urgent
     parts = [
       { strong: `Grid import during peak` },
-      { txt: ` \u00B7 ${(grid/1000).toFixed(1)} kW at $${rate.toFixed(2)}/kWh. Defer large loads if you can.` },
+      { txt: ` \u00B7 ${(grid/1000).toFixed(1)} kW at $${rate.toFixed(2)}/kWh. Defer large loads.` },
     ];
   } else if (grid > 500 && period === 'part_peak') {
-    ico = '\u26A1'; // \u26A1
     parts = [
       { strong: `Grid import during part-peak` },
       { txt: ` \u00B7 ${(grid/1000).toFixed(1)} kW at $${rate.toFixed(2)}/kWh.` },
     ];
-  } else if (grid < -500) {
-    // Exporting. Don't quote a specific $/kWh \u2014 the configured rate in
-    // config.yml ($0.12-0.16) is likely above what PG&E actually pays under
-    // NEM 2/3 after non-bypassable charges and true-up, so showing it makes
-    // the dashboard sound more optimistic than it is.
-    ico = '';
-    parts = [
-      { strong: `Exporting ${Math.abs(grid/1000).toFixed(1)} kW to grid` },
-      { txt: ` \u00B7 battery already full at ${soc.toFixed(0)}%, surplus going back.` },
-    ];
-  } else if (grid > 200 && period === 'off_peak' && battery < -200) {
-    // Off-peak grid charging \u2014 expected overnight behavior, narrate it
-    ico = '\uD83D\uDD0C'; // \uD83D\uDD0C
+  } else if (soc >= SOC_NEAR_FULL && solar > 200) {
+    // Battery near full + daytime \u2014 Tesla autonomous mode may be making
+    // its own charge decisions even with our switch off. Don't call this
+    // "grid charging" since the cap loop didn't trigger it; describe
+    // physics neutrally.
+    const surplus = solar - home;
+    if (surplus > 200) {
+      parts = [
+        { strong: `Battery near full at ${soc.toFixed(0)}%` },
+        { txt: ` \u00B7 ${(surplus/1000).toFixed(1)} kW solar surplus, ${grid > 100 ? (grid/1000).toFixed(1) + ' kW grid trickle' : 'no grid pull'}.` },
+      ];
+    } else {
+      parts = [
+        { strong: `Battery near full at ${soc.toFixed(0)}%` },
+        { txt: ` \u00B7 solar ${(solar/1000).toFixed(1)} kW \u2248 home ${(home/1000).toFixed(1)} kW.` },
+      ];
+    }
+  } else if (grid > 200 && period === 'off_peak' && battery < -200 && soc < SOC_NEAR_FULL) {
+    // Genuine off-peak grid charging \u2014 battery isn't near full
     parts = [
       { strong: `Charging battery from off-peak grid` },
       { txt: ` \u00B7 ${(grid/1000).toFixed(1)} kW in at $${rate.toFixed(2)}/kWh, SOC ${soc.toFixed(0)}%.` },
     ];
   } else if (solar > 200 && battery < -200 && Math.abs(grid) < 200) {
-    // Solar charging battery \u2014 ideal daytime state
-    ico = '\u2600\uFE0F'; // \u2600\uFE0F
+    // Solar charging battery, no grid involved \u2014 ideal daytime
     parts = [
       { strong: `Solar charging battery` },
       { txt: ` \u00B7 ${(solar/1000).toFixed(1)} kW in, SOC ${soc.toFixed(0)}% \u2192 99% target.` },
     ];
   } else if (solar > home + 100 && Math.abs(grid) < 200 && Math.abs(battery) < 200) {
-    // Solar covering home, battery full, no grid movement \u2014 rare but ideal
-    ico = '\u2600\uFE0F';
+    // Solar covers home, battery idle (full), no grid \u2014 clean
     parts = [
       { strong: `Self-powered` },
-      { txt: ` \u00B7 solar covering ${(home/1000).toFixed(1)} kW home, battery full, no grid.` },
+      { txt: ` \u00B7 solar covering ${(home/1000).toFixed(1)} kW home, battery idle, no grid.` },
     ];
   } else if (battery > 200 && solar < 100) {
     // Battery powering everything (overnight)
     const hoursLeft = soc > 20 ? ((soc - 20) / 100 * 40.5) / Math.max(0.5, battery/1000) : 0;
-    ico = '\uD83D\uDD0B'; // \uD83D\uDD0B
     parts = [
       { strong: `Battery powered` },
       { txt: ` \u00B7 ${(battery/1000).toFixed(1)} kW out, SOC ${soc.toFixed(0)}%` + (hoursLeft > 0 ? `, ~${hoursLeft.toFixed(1)} hrs to reserve.` : '.') },
     ];
   } else if (soc < 20) {
-    // Battery at reserve, no help available
-    ico = '\uD83E\uDEAB'; // \uD83E\uDEAB
     parts = [
       { strong: `Battery at reserve (${soc.toFixed(0)}%)` },
       { txt: ` \u00B7 ${grid > 0 ? `grid covering load at $${rate.toFixed(2)}/kWh` : 'solar will recharge'}.` },
     ];
   } else if (Math.abs(grid) < 100 && Math.abs(battery) < 100 && Math.abs(solar) < 100) {
-    // Truly idle
-    ico = '\u23FB'; // \u23FB
     parts = [
       { strong: `Quiet` },
-      { txt: ` \u00B7 ${(home/1000).toFixed(2)} kW home draw, mostly self-powered.` },
+      { txt: ` \u00B7 ${(home/1000).toFixed(2)} kW home draw.` },
     ];
   } else {
-    // Don't surface anything noisy
     bar.classList.remove('show');
     return;
   }
 
-  icon.textContent = ico;
+  icon.textContent = '';  // no emojis
   for (const p of parts) {
     if (p.strong) {
       const s = document.createElement('strong');
@@ -2314,9 +2318,9 @@ function renderCircuitTable() {
   }
   if (label) {
     const parts = [];
-    if (s > 0.5) parts.push(`☀ ${Math.round(s)}%`);
-    if (b > 0.5) parts.push(`⚡ ${Math.round(b)}%`);
-    if (g > 0.5) parts.push(`⏻ ${Math.round(g)}%`);
+    if (s > 0.5) parts.push(`Solar ${Math.round(s)}%`);
+    if (b > 0.5) parts.push(`Battery ${Math.round(b)}%`);
+    if (g > 0.5) parts.push(`Grid ${Math.round(g)}%`);
     label.textContent = parts.join('  ');
   }
 }
@@ -2842,12 +2846,19 @@ function drawEnergyFlowSankey(d) {
     .append('title')
     .text(l => `${l.source.name} → ${l.target.name}: ${l.value.toFixed(1)} kWh`);
 
-  // Link labels — show kWh value at midpoint of each stream so user doesn't
-  // have to hover to see "what went into battery" / "what came back out".
-  // Hide for tiny streams (<5% of largest) to reduce clutter.
+  // Link labels — kWh on each stream that *touches* the middle Battery node,
+  // so user can read "what went in / what came out" without hovering. We
+  // suppress pass-through link labels (e.g., Solar→Home) since their values
+  // are already visible in the source/target node totals and the stream
+  // widths — adding them just piles labels on top of each other.
+  const middleNodes = graph.nodes.filter(n =>
+    (n.sourceLinks && n.sourceLinks.length) &&
+    (n.targetLinks && n.targetLinks.length)
+  );
+  const touchesMiddle = (l) => middleNodes.some(n => l.source === n || l.target === n);
   const biggest = Math.max(...graph.links.map(l => l.value));
   svg.append('g').selectAll('text.link-label')
-    .data(graph.links.filter(l => l.value >= biggest * 0.05))
+    .data(graph.links.filter(l => l.value >= biggest * 0.05 && touchesMiddle(l)))
     .join('text')
     .attr('class', 'link-label')
     .attr('x', l => (l.source.x1 + l.target.x0) / 2)
@@ -2877,15 +2888,19 @@ function drawEnergyFlowSankey(d) {
     .append('title')
     .text(n => `${n.name}: ${n.value.toFixed(1)} kWh`);
 
-  // Node labels — outside-the-rect, side based on column position
+  // Node labels — outside-the-rect. Middle-column nodes (flow in AND out)
+  // place label above the rect so it doesn't overlap streams crossing through.
+  // Left-column nodes anchor right of the rect; right-column nodes left of it.
+  const isMiddle = n => (n.sourceLinks && n.sourceLinks.length > 0) &&
+                       (n.targetLinks && n.targetLinks.length > 0);
   svg.append('g').selectAll('text.node-label')
     .data(graph.nodes)
     .join('text')
     .attr('class', 'node-label')
-    .attr('x', n => n.x0 < width / 2 ? n.x1 + 6 : n.x0 - 6)
-    .attr('y', n => (n.y0 + n.y1) / 2)
-    .attr('dy', '0.35em')
-    .attr('text-anchor', n => n.x0 < width / 2 ? 'start' : 'end')
+    .attr('x', n => isMiddle(n) ? (n.x0 + n.x1) / 2 : (n.x0 < width / 2 ? n.x1 + 6 : n.x0 - 6))
+    .attr('y', n => isMiddle(n) ? n.y0 - 6 : (n.y0 + n.y1) / 2)
+    .attr('dy', n => isMiddle(n) ? 0 : '0.35em')
+    .attr('text-anchor', n => isMiddle(n) ? 'middle' : (n.x0 < width / 2 ? 'start' : 'end'))
     .attr('fill', '#cbd5e1')
     .attr('paint-order', 'stroke')
     .attr('stroke', 'rgba(15,18,28,0.95)')
@@ -2912,42 +2927,211 @@ function renderBatteryFlowDetail(d) {
     const inTotal = solarToBattery + gridToBattery;
     const loss = Math.max(0, inTotal - batteryToHome);
     const eff = inTotal > 0 ? (batteryToHome / inTotal * 100) : null;
+    const days = d.days || 1;
     let socPct = (typeof window._latestBatterySoc === 'number') ? window._latestBatterySoc : null;
     if (socPct == null) {
       const socEl = document.getElementById('socPct');
       const v = socEl ? parseFloat(socEl.textContent) : NaN;
       socPct = isNaN(v) ? null : v;
     }
-    const capacityKwh = 40.5;
-    const reservePct = 20;
-    const stored = socPct != null ? (socPct / 100 * capacityKwh) : null;
-    const usable = stored != null ? Math.max(0, stored - reservePct/100 * capacityKwh) : null;
+    const pwCapacityKwh = 40.5;
+    const pwStored = socPct != null ? (socPct / 100 * pwCapacityKwh) : null;
     const detail = document.getElementById('batteryFlowDetail');
     if (!detail) return;
     while (detail.firstChild) detail.removeChild(detail.firstChild);
+
     const _strong = (t) => { const s = document.createElement('strong'); s.textContent = t; return s; };
-    const _txt = (t) => document.createTextNode(t);
-    detail.appendChild(_strong(`battery flow (${d.days}d):`));
-    detail.appendChild(_txt(
+
+    // ---- Battery flow over selected window (kWh in/out + per-day avg) ----
+    const flowLine = document.createElement('div');
+    flowLine.appendChild(_strong(`Powerwall flow (${days}d):`));
+    const perDayIn = inTotal / days;
+    const perDayOut = batteryToHome / days;
+    flowLine.appendChild(document.createTextNode(
       ` solar ${solarToBattery.toFixed(0)} + grid ${gridToBattery.toFixed(0)} = ${inTotal.toFixed(0)} kWh in · ` +
-      `${batteryToHome.toFixed(0)} kWh out · ` +
-      `${loss.toFixed(1)} kWh loss` +
-      (eff != null ? ` (${eff.toFixed(0)}% efficiency)` : '')
+      `${batteryToHome.toFixed(0)} kWh out · ${loss.toFixed(1)} kWh loss` +
+      (eff != null ? ` (${eff.toFixed(0)}% efficiency)` : '') +
+      ` · avg ${perDayIn.toFixed(1)} in / ${perDayOut.toFixed(1)} out per day`
     ));
-    detail.appendChild(document.createElement('br'));
+    detail.appendChild(flowLine);
+
+    // ---- Collect per-battery rows (Powerwall + cars) with kWh sizing ----
+    const rows = [];
     if (socPct != null) {
-      detail.appendChild(_strong('state:'));
-      detail.appendChild(_txt(
-        ` ${socPct.toFixed(0)}% SOC (${stored.toFixed(1)} kWh stored, ` +
-        `${usable.toFixed(1)} kWh usable above ${reservePct}% reserve) · ` +
-        `${capacityKwh} kWh capacity (3 × Powerwall 2)`
-      ));
-    } else {
-      detail.appendChild(_strong('capacity:'));
-      detail.appendChild(_txt(` ${capacityKwh} kWh (3 × Powerwall 2) · reserve ${reservePct}%`));
+      // Powerwall provenance: ratio of solar vs grid charge over window
+      const solarMixPct = inTotal > 0 ? (solarToBattery / inTotal * 100) : null;
+      rows.push({
+        name: 'Powerwall',
+        pct: socPct,
+        storedKwh: pwStored,
+        capacityKwh: pwCapacityKwh,
+        capacityPrecise: true,
+        status: '3 × Powerwall 2',
+        solarMixPct,
+      });
     }
-    detail.style.display = 'block';
+    const ev = window._lastEvData;
+    if (ev && typeof ev === 'object') {
+      Object.values(ev).forEach(v => {
+        if (!v || v.battery_level == null) return;
+        const eff = v.efficiency_mi_per_kwh;
+        let storedKwh = null, capacityKwh = null;
+        if (eff && v.battery_range != null) {
+          storedKwh = v.battery_range / eff;
+          if (v.battery_level > 1) {
+            capacityKwh = storedKwh / (v.battery_level / 100);
+          }
+        }
+        let statusBit;
+        if (v.is_charging && (v.charger_power_kw || 0) > 0.1) {
+          statusBit = `charging ${v.charger_power_kw} kW`;
+        } else {
+          const cs = (v.charging_state || '').toLowerCase();
+          if (cs === 'disconnected' || cs === 'nopower' || cs === 'no_power') statusBit = 'unplugged';
+          else if (cs === 'charging') statusBit = 'charging';
+          else if (cs === 'complete') statusBit = 'plugged in, complete';
+          else statusBit = 'plugged in, idle';
+        }
+        const range = v.battery_range != null ? `${v.battery_range.toFixed(0)} mi range` : '';
+        rows.push({
+          name: v.name,
+          pct: v.battery_level,
+          storedKwh,
+          capacityKwh,
+          capacityPrecise: false,  // derived from efficiency estimate
+          status: range ? `${range} · ${statusBit}` : statusBit,
+          solarMixPct: null,
+        });
+      });
+    }
+
+    // ---- Car charging provenance (eGauge "EV Charger" — both cars share it) ----
+    // Both vehicles wall-charge through the same eGauge circuit, so we can't
+    // attribute per-car. Show one combined row instead.
+    const hist = window._evHistory;
+    if (hist && hist.solar_mix_pct != null && hist.total_kwh > 0) {
+      rows.push({
+        name: 'Car charging',
+        isAggregate: true,
+        totalKwh: hist.total_kwh,
+        windowDays: hist.days,
+        solarMixPct: hist.solar_mix_pct,
+      });
+    }
+
+    // ---- Inventory summary line ----
+    const totalCap = rows.reduce((s, r) => s + (r.capacityKwh || 0), 0);
+    const totalStored = rows.reduce((s, r) => s + (r.storedKwh || 0), 0);
+    if (totalCap > 0) {
+      const inv = document.createElement('div');
+      inv.style.cssText = 'margin-top:8px';
+      inv.appendChild(_strong('Storage:'));
+      inv.appendChild(document.createTextNode(
+        ` ${totalCap.toFixed(0)} kWh owned · ${totalStored.toFixed(0)} kWh currently stored ` +
+        `(${(totalStored / totalCap * 100).toFixed(0)}% full)`
+      ));
+      detail.appendChild(inv);
+    }
+
+    // ---- Per-battery grid ----
+    if (rows.length) {
+      const header = document.createElement('div');
+      header.style.cssText = 'margin-top:6px';
+      header.appendChild(_strong('Batteries:'));
+      detail.appendChild(header);
+
+      const grid = document.createElement('div');
+      grid.style.cssText =
+        'display:grid;grid-template-columns:auto auto auto 1fr;column-gap:14px;row-gap:3px;' +
+        'margin-top:2px;padding-left:12px;align-items:center;';
+      const makeBar = (solarPct) => {
+        const bar = document.createElement('span');
+        bar.style.cssText = 'display:inline-flex;width:110px;height:6px;border-radius:3px;overflow:hidden;background:var(--border);flex-shrink:0';
+        const sun = document.createElement('span');
+        sun.style.cssText = `background:var(--solar);width:${solarPct}%;`;
+        const g = document.createElement('span');
+        g.style.cssText = `background:var(--grid-color);width:${100 - solarPct}%;`;
+        bar.appendChild(sun);
+        bar.appendChild(g);
+        return bar;
+      };
+      rows.forEach(r => {
+        const nameCell = document.createElement('span');
+        nameCell.textContent = r.name;
+        nameCell.style.cssText = 'color:var(--text);';
+        const pctCell = document.createElement('span');
+        pctCell.style.cssText = 'text-align:right;color:var(--text);';
+        const sizeCell = document.createElement('span');
+        sizeCell.style.cssText = 'color:var(--text-muted);';
+        const statusCell = document.createElement('span');
+
+        if (r.isAggregate) {
+          // Car charging aggregate row: no SOC, just totals + provenance
+          pctCell.textContent = `${r.windowDays}d`;
+          pctCell.style.color = 'var(--text-muted)';
+          sizeCell.textContent = `${r.totalKwh.toFixed(0)} kWh total`;
+          statusCell.style.cssText = 'display:flex;align-items:center;gap:8px;color:var(--text-muted);';
+          statusCell.appendChild(makeBar(r.solarMixPct));
+          const txt = document.createElement('span');
+          txt.textContent = `${r.solarMixPct.toFixed(0)}% solar / ${(100 - r.solarMixPct).toFixed(0)}% grid (incl. Powerwall provenance)`;
+          statusCell.appendChild(txt);
+        } else {
+          pctCell.textContent = `${r.pct.toFixed(0)}%`;
+          if (r.storedKwh != null && r.capacityKwh != null) {
+            const capStr = r.capacityPrecise ? r.capacityKwh.toFixed(1) : r.capacityKwh.toFixed(0);
+            const storedStr = r.capacityPrecise ? r.storedKwh.toFixed(1) : r.storedKwh.toFixed(0);
+            sizeCell.textContent = `${storedStr} / ${capStr} kWh`;
+          }
+          if (r.solarMixPct != null) {
+            statusCell.style.cssText = 'display:flex;align-items:center;gap:8px;color:var(--text-muted);';
+            statusCell.appendChild(makeBar(r.solarMixPct));
+            const txt = document.createElement('span');
+            txt.textContent = `${r.solarMixPct.toFixed(0)}% solar / ${(100 - r.solarMixPct).toFixed(0)}% grid charged (${days}d)`;
+            statusCell.appendChild(txt);
+          } else {
+            statusCell.textContent = r.status;
+            statusCell.style.cssText = 'color:var(--text-muted);';
+          }
+        }
+
+        grid.appendChild(nameCell);
+        grid.appendChild(pctCell);
+        grid.appendChild(sizeCell);
+        grid.appendChild(statusCell);
+      });
+      detail.appendChild(grid);
+    }
+
+    // ---- Show the collapsible toggle with a one-line summary chip ----
+    const toggle = document.getElementById('batteryDetailToggle');
+    const summary = document.getElementById('batteryDetailSummary');
+    if (toggle) toggle.style.display = 'flex';
+    if (summary) {
+      const bits = [];
+      if (totalCap > 0) {
+        bits.push(`${totalStored.toFixed(0)} / ${totalCap.toFixed(0)} kWh stored`);
+      } else if (socPct != null) {
+        bits.push(`Powerwall ${socPct.toFixed(0)}%`);
+      }
+      bits.push(`${perDayIn.toFixed(1)} in / ${perDayOut.toFixed(1)} out per day`);
+      summary.textContent = bits.join(' · ');
+    }
+    // Detail visibility is user-controlled via toggle. Default collapsed.
+    if (!window._batteryDetailOpen) {
+      detail.style.display = 'none';
+    } else {
+      detail.style.display = 'block';
+    }
   } catch (_) {}
+}
+
+function toggleBatteryDetail() {
+  const detail = document.getElementById('batteryFlowDetail');
+  const chevron = document.getElementById('batteryDetailChevron');
+  const open = detail.style.display === 'none' || !detail.style.display;
+  detail.style.display = open ? 'block' : 'none';
+  chevron.style.transform = open ? 'rotate(90deg)' : 'rotate(0deg)';
+  window._batteryDetailOpen = open;
 }
 
 // Initial load + reload on window resize
@@ -3350,7 +3534,7 @@ function renderHistCircuitTable() {
     // Show total peak % with battery coverage indicator
     const batteryCovered = c.grid_peak_pct !== undefined && c.peak_pct > 1 && c.grid_peak_pct < 1;
     const peakLabel = batteryCovered
-      ? `${c.peak_pct.toFixed(0)}% <span style="color:var(--battery-color);font-size:var(--fs-xs)" title="Battery covers peak">⚡</span>`
+      ? `${c.peak_pct.toFixed(0)}% <span style="color:var(--battery-color);font-size:var(--fs-xs)" title="Battery covered peak">(bat)</span>`
       : `${c.peak_pct.toFixed(0)}%`;
     const spark = renderCircuitSparkline(c.daily_kwh);
     const anomalyBadge = c.anomaly
@@ -3475,7 +3659,7 @@ async function loadSolar() {
         ? '< 1%' : bat.solar_pct.toFixed(0) + '%';
       document.getElementById('batSolarPct').textContent = solarPctDisplay;
       document.getElementById('batChargeSub').textContent =
-        `☀ ${bat.solar_charge_kwh.toFixed(1)} kWh · ⏻ ${bat.grid_charge_kwh.toFixed(1)} kWh`;
+        `solar ${bat.solar_charge_kwh.toFixed(1)} kWh · grid ${bat.grid_charge_kwh.toFixed(1)} kWh`;
 
       // Efficiency
       const effPct = (bat.efficiency * 100).toFixed(0);
@@ -3507,6 +3691,13 @@ async function loadSolar() {
 function updateEV(evData) {
   if (!evData || !window._evEnabled) return;
 
+  // Cache for the multi-battery panel below the Sankey so it can render
+  // car SOC alongside Powerwall SOC.
+  window._lastEvData = evData;
+  if (window._lastSankeyData && typeof renderBatteryFlowDetail === 'function') {
+    renderBatteryFlowDetail(window._lastSankeyData);
+  }
+
   const bar = document.getElementById('evBar');
   const summary = document.getElementById('evBarSummary');
   const detail = document.getElementById('evBarDetail');
@@ -3528,7 +3719,7 @@ function updateEV(evData) {
     const color = pct > 50 ? 'var(--green)' : pct > 20 ? 'var(--yellow)' : 'var(--red)';
     let status = `<span class="ev-val" style="color:${color}">${pct}%</span>`;
     if (v.is_charging) {
-      status += ` <span class="ev-charging-active">⚡ ${v.charger_power_kw} kW</span>`;
+      status += ` <span class="ev-charging-active">${v.charger_power_kw} kW</span>`;
     }
     items.push(`<span class="ev-item">${v.name} ${status}</span>`);
   });
@@ -3569,6 +3760,10 @@ async function loadEVHistory() {
     const d = await r.json();
     if (d && !d.error) {
       window._evHistory = d;
+      // Re-render battery panel so car-charging provenance row appears
+      if (window._lastSankeyData && typeof renderBatteryFlowDetail === 'function') {
+        renderBatteryFlowDetail(window._lastSankeyData);
+      }
     }
   } catch (e) {
     console.error('loadEVHistory error:', e);

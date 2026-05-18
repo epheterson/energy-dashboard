@@ -1210,17 +1210,54 @@ async def api_ev_history(days: int = 7):
     # be ~100%, but the day-average grid_share is ~75% because the rest of the
     # home was on solar during the day). The solar endpoint computes per-hour
     # per-circuit grid_share, which is the right number for cost.
+    # Provenance: where did the car-charge electricity come from over this window?
+    # We have per-hour per-circuit attribution in /api/solar:
+    #   sc["solar_kwh"]   = solar drawn directly into the car during daylight
+    #   sc["grid_kwh"]    = grid drawn directly (overnight off-peak typically)
+    #   sc["battery_kwh"] = Powerwall discharge into the car
+    # The Powerwall itself is some mix of solar- and grid-charged, so we
+    # attribute battery_kwh back to its sources using battery_solar_pct from
+    # the system summary, giving an "effective" solar mix for car charging.
+    solar_direct_kwh = None
+    grid_direct_kwh = None
+    battery_kwh = None
+    pw_solar_pct = None
     if is_solar_enabled():
         try:
             solar = await fetch_solar(days)
             if solar and not solar.get("error"):
                 for sc in solar.get("circuits", []):
                     if sc.get("name") == "EV Charger":
-                        # actual_cost = grid_cost (TOU rates × grid kWh) + battery_cost
                         total_cost = float(sc.get("actual_cost") or total_cost)
+                        solar_direct_kwh = float(sc.get("solar_kwh", 0))
+                        grid_direct_kwh = float(sc.get("grid_kwh", 0))
+                        battery_kwh = float(sc.get("battery_kwh", 0))
                         break
+            # Powerwall provenance: same per-hour physics as the sankey, so
+            # the car provenance and Powerwall provenance bars agree.
+            flows = await api_energy_flows(days)
+            if flows and not flows.get("error"):
+                link_by = {
+                    f"{l['source']}→{l['target']}": l["value"]
+                    for l in flows.get("links", [])
+                }
+                s2b = float(link_by.get("Solar→Battery", 0))
+                g2b = float(link_by.get("Grid Import→Battery", 0))
+                if s2b + g2b > 0:
+                    pw_solar_pct = s2b / (s2b + g2b) * 100.0
         except Exception as e:
-            print(f"EV cost solar-blend fetch failed: {e}")
+            print(f"EV provenance fetch failed: {e}")
+
+    solar_mix_pct = None
+    solar_attributed_kwh = None
+    grid_attributed_kwh = None
+    if solar_direct_kwh is not None and grid_direct_kwh is not None:
+        bat = battery_kwh or 0.0
+        pw_solar = (pw_solar_pct or 0.0) / 100.0
+        solar_attributed_kwh = solar_direct_kwh + bat * pw_solar
+        grid_attributed_kwh = grid_direct_kwh + bat * (1.0 - pw_solar)
+        denom = solar_attributed_kwh + grid_attributed_kwh
+        solar_mix_pct = (solar_attributed_kwh / denom * 100.0) if denom > 0 else None
 
     miles = total_kwh * avg_efficiency
     gas_price = get_ev_config().get("gas_price_per_gallon", 4.50)
@@ -1242,6 +1279,22 @@ async def api_ev_history(days: int = 7):
         "off_peak_pct": round(
             ev_circuit.get("by_tou", {}).get("off_peak", {}).get("percent", 0), 1
         ),
+        # Provenance — only present when solar attribution succeeded
+        "solar_direct_kwh": (
+            round(solar_direct_kwh, 2) if solar_direct_kwh is not None else None
+        ),
+        "grid_direct_kwh": (
+            round(grid_direct_kwh, 2) if grid_direct_kwh is not None else None
+        ),
+        "battery_kwh": round(battery_kwh, 2) if battery_kwh is not None else None,
+        "powerwall_solar_pct": pw_solar_pct,
+        "solar_attributed_kwh": (
+            round(solar_attributed_kwh, 2) if solar_attributed_kwh is not None else None
+        ),
+        "grid_attributed_kwh": (
+            round(grid_attributed_kwh, 2) if grid_attributed_kwh is not None else None
+        ),
+        "solar_mix_pct": round(solar_mix_pct, 1) if solar_mix_pct is not None else None,
     }
     cache.set(cache_key, data)
     return data
