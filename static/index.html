@@ -349,7 +349,40 @@ header h1 {
   letter-spacing: 0.5px;
 }
 
-.panel-body { padding: 20px; }
+.panel-body { padding: 20px; position: relative; }
+.panel-body.is-loading > *:not(.panel-loading-veil) {
+  opacity: 0.4;
+  transition: opacity 120ms ease;
+  pointer-events: none;
+}
+.panel-loading-veil {
+  position: absolute;
+  top: 8px;
+  right: 16px;
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  letter-spacing: 0.04em;
+  display: none;
+  font-variant-numeric: tabular-nums;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.panel-body.is-loading .panel-loading-veil {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.panel-loading-veil::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  animation: panel-loading-pulse 0.9s ease-in-out infinite;
+}
+@keyframes panel-loading-pulse {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 1; }
+}
 
 .period-selector {
   display: flex;
@@ -2367,11 +2400,12 @@ async function loadDay(which, btn) {
   }
   // Reset solar adjustment when switching days
   window._todayGridCost = null;
-  await loadDayData(which);
-  // Re-apply solar adjustment for the new day
-  if (window._solarEnabled && window._todaySolarData) {
-    applyTodaySolarAdjustment();
-  }
+  await withPanelLoading(btn, async () => {
+    await loadDayData(which);
+    if (window._solarEnabled && window._todaySolarData) {
+      applyTodaySolarAdjustment();
+    }
+  });
 }
 
 async function loadDayData(which) {
@@ -2756,26 +2790,51 @@ document.addEventListener('keydown', (e) => {
 // ==========================================
 window._energyFlowDays = 7;
 
+// Loading state helper: while a fetch is in-flight, dim the enclosing
+// panel-body and show a small "Loading…" indicator so timescale switches
+// don't appear to be ignored.
+function _panelBodyOf(el) {
+  if (!el) return null;
+  return el.closest('.panel-body') || el.closest('.panel')?.querySelector('.panel-body') || null;
+}
+async function withPanelLoading(btnOrEl, fn) {
+  const body = _panelBodyOf(btnOrEl);
+  if (body && !body.querySelector('.panel-loading-veil')) {
+    const veil = document.createElement('span');
+    veil.className = 'panel-loading-veil';
+    veil.textContent = 'Loading';
+    body.appendChild(veil);
+  }
+  if (body) body.classList.add('is-loading');
+  try {
+    return await fn();
+  } finally {
+    if (body) body.classList.remove('is-loading');
+  }
+}
+
 async function loadEnergyFlows(days, btn) {
   if (btn) {
     btn.closest('.period-selector').querySelectorAll('button').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
   }
   window._energyFlowDays = days;
-  try {
-    const r = await fetch('/api/energy-flows?days=' + days);
-    const d = await r.json();
-    if (d.error) {
-      document.getElementById('energyFlowPanel').style.display = 'none';
-      return;
+  await withPanelLoading(btn, async () => {
+    try {
+      const r = await fetch('/api/energy-flows?days=' + days);
+      const d = await r.json();
+      if (d.error) {
+        document.getElementById('energyFlowPanel').style.display = 'none';
+        return;
+      }
+      const t = d.totals || {};
+      document.getElementById('energyFlowSummary').textContent =
+        `${t.self_sufficiency_pct ?? '--'}% self-sufficient · ${t.home_consumption_kwh ?? '--'} kWh home${t.ev_consumption_kwh ? ' · ' + t.ev_consumption_kwh + ' kWh EV' : ''} · ${t.grid_export_kwh ?? '--'} kWh exported`;
+      drawEnergyFlowSankey(d);
+    } catch (e) {
+      console.warn('energy flows error', e);
     }
-    const t = d.totals || {};
-    document.getElementById('energyFlowSummary').textContent =
-      `${t.self_sufficiency_pct ?? '--'}% self-sufficient · ${t.home_consumption_kwh ?? '--'} kWh home${t.ev_consumption_kwh ? ' · ' + t.ev_consumption_kwh + ' kWh EV' : ''} · ${t.grid_export_kwh ?? '--'} kWh exported`;
-    drawEnergyFlowSankey(d);
-  } catch (e) {
-    console.warn('energy flows error', e);
-  }
+  });
 }
 
 function drawEnergyFlowSankey(d) {
@@ -3149,21 +3208,23 @@ loadEnergyFlows = async function(days, btn) {
     btn.classList.add('active');
   }
   window._energyFlowDays = days;
-  try {
-    const r = await fetch('/api/energy-flows?days=' + days);
-    const d = await r.json();
-    if (d.error) {
-      document.getElementById('energyFlowPanel').style.display = 'none';
-      return;
+  await withPanelLoading(btn, async () => {
+    try {
+      const r = await fetch('/api/energy-flows?days=' + days);
+      const d = await r.json();
+      if (d.error) {
+        document.getElementById('energyFlowPanel').style.display = 'none';
+        return;
+      }
+      window._energyFlowLastData = d;
+      const t = d.totals || {};
+      document.getElementById('energyFlowSummary').textContent =
+        `${t.self_sufficiency_pct ?? '--'}% self-sufficient · ${t.home_consumption_kwh ?? '--'} kWh home${t.ev_consumption_kwh ? ' · ' + t.ev_consumption_kwh + ' kWh EV' : ''} · ${t.grid_export_kwh ?? '--'} kWh exported`;
+      drawEnergyFlowSankey(d);
+    } catch (e) {
+      console.warn('energy flows error', e);
     }
-    window._energyFlowLastData = d;
-    const t = d.totals || {};
-    document.getElementById('energyFlowSummary').textContent =
-      `${t.self_sufficiency_pct ?? '--'}% self-sufficient · ${t.home_consumption_kwh ?? '--'} kWh home${t.ev_consumption_kwh ? ' · ' + t.ev_consumption_kwh + ' kWh EV' : ''} · ${t.grid_export_kwh ?? '--'} kWh exported`;
-    drawEnergyFlowSankey(d);
-  } catch (e) {
-    console.warn('energy flows error', e);
-  }
+  });
 };
 
 // ==========================================
