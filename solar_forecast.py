@@ -491,7 +491,16 @@ def recommend_charge_cap():
     hard_floor = backup_reserve_pct / 100 + safety_margin
     min_cap_pct = max(hard_floor, required_sunrise_pct)
 
-    chosen_cap_pct = max(min_cap_pct, target_cap_pct)
+    # Decision: use the FLOOR (just enough to cover tomorrow's peak). Don't
+    # grid-charge beyond that to "fill to 100% by sunset" — that's what
+    # target_cap_pct optimizes for, but it (a) costs $0.36/kWh in overnight
+    # grid charges, (b) leaves zero headroom for the model being wrong about
+    # solar/load, and (c) forces export at $0.12/kWh when the model is even
+    # slightly optimistic about consumption. target_cap_pct is preserved in
+    # the output for transparency but no longer drives the choice.
+    # (User principle 2026-05-18: "if it's putting juice in overnight AT ALL
+    # then hitting 100% early that's a problem with our algorithm.")
+    chosen_cap_pct = min_cap_pct
     chosen_cap_pct = min(1.0, max(0.05, chosen_cap_pct))
     recommended_cap = int(chosen_cap_pct * 100)
 
@@ -555,20 +564,19 @@ def recommend_charge_cap():
         )
         modeled = {"current_soc_pct": None, "note": "HA unreachable; aggregate math"}
 
-    # Decision reasoning
-    if min_cap_pct > target_cap_pct:
-        if required_sunrise_pct > hard_floor:
-            reason_summary = (
-                f"FLOOR (need {required_sunrise_pct*100:.0f}% at sunrise to cover "
-                f"~{peak_base_load:.0f} kWh peak)"
-            )
-        else:
-            reason_summary = (
-                f"FLOOR (backup_reserve {backup_reserve_pct}% + "
-                f"{int(safety_margin*100)}% safety)"
-            )
+    # Decision reasoning. Cap is always FLOOR — just enough to cover tomorrow's
+    # peak from battery. We expose target_cap_pct as informational only.
+    if required_sunrise_pct > hard_floor:
+        reason_summary = (
+            f"FLOOR (need {required_sunrise_pct*100:.0f}% at sunrise to cover "
+            f"~{peak_base_load:.0f} kWh peak)"
+        )
     else:
-        reason_summary = "TARGET (solar excess fills battery to 99% by sunset)"
+        reason_summary = (
+            f"FLOOR (backup_reserve {backup_reserve_pct}% + "
+            f"{int(safety_margin*100)}% safety) — solar will refill battery, "
+            f"no overnight grid-charge needed"
+        )
 
     result = {
         "recommended_cap": recommended_cap,
