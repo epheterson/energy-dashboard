@@ -34,7 +34,20 @@ solar:
     grid_exported: "sensor.solar_power_plant_grid_exported"
     battery_charged: "sensor.solar_power_plant_battery_charged"
     battery_discharged: "sensor.solar_power_plant_battery_discharged"
-  battery_efficiency: 0.90  # Round-trip efficiency (Powerwall 2 ≈ 90%)
+  battery_efficiency: 0.90  # Round-trip efficiency (Powerwall 2 ≈ 90% nameplate;
+                            # observed values are often ~0.82 — set this to your
+                            # measured efficiency for accurate cap recommendations)
+  battery_capacity_kwh: 13.5  # Total nameplate capacity (Powerwall 2 = 13.5 kWh each).
+                              # Example: 3× Powerwall 2 = 40.5 kWh
+  backup_reserve_pct: 20  # Hardware floor — Powerwall maintains this for outage power
+  max_charge_kw: 5.0      # Max continuous charge rate (Powerwall 2 = 5 kW each)
+  max_discharge_kw: 5.0   # Max continuous discharge rate
+
+  # OPTIONAL: pin the recommended cap to backup_reserve_pct, disabling the
+  # optimizer entirely. Useful for baselining pure Tesla self-consumption
+  # behavior. Set to false to resume per-hour simulation.
+  experiment_no_grid_charge: false
+
   export_credits:
     winter:
       peak: 0.16

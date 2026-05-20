@@ -9,11 +9,15 @@ Works great without solar too — set `solar.enabled: false` for a grid-only cos
 ## Features
 
 - **Live Power Flow** — WebSocket-powered 5-second updates showing per-circuit watts
+- **Energy Flow Sankey** — Visual breakdown of where solar/grid/battery energy goes (Home / EV / Grid Export) over 1d / 7d / 30d windows
+- **Multi-Battery Panel** — Combined view of Powerwall + every connected EV (SOC, kWh stored, capacity)
+- **Charge Provenance Bars** — Per-battery solar vs grid mix (e.g., "Powerwall: 56% solar / 44% grid charged this week"; "Car charging: 10% solar / 90% grid"). EV provenance includes Powerwall's solar share, attributed through.
 - **TOU Cost Tracking** — Automatic rate calculation based on your utility's peak/off-peak schedule
 - **Hourly & Historical Charts** — Stacked bar charts by TOU period with click-to-drilldown
 - **Circuit Breakdown** — Sortable table with today's kWh and cost per circuit
 - **Solar + Battery Tracking** — Live solar generation, battery charge/discharge, grid import/export via Home Assistant + Tesla Powerwall
 - **Battery Economics** — Cost per kWh, charge source breakdown (solar vs grid), round-trip efficiency, savings vs peak rates
+- **Per-Hour Cap Optimizer** — Recommends tomorrow's grid-charge cap by simulating 24h hour-by-hour. Models same-day-of-week load patterns (weekday vs weekend), EV-excluded base load, Tesla SOC taper above 90%, and measured battery efficiency. Picks the lowest-cost cap (or pin to backup_reserve via `experiment_no_grid_charge` config flag to baseline pure self-consumption).
 - **Optimization Opportunities** — Identifies circuits with high peak usage and potential savings
 - **Weekly Email Reports** — Automated Monday morning cost summaries
 

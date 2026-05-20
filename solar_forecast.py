@@ -13,8 +13,66 @@ from pathlib import Path
 
 CACHE_DIR = Path(__file__).parent / "data"
 
-# NWS gridpoint for Danville, CA (37.8216, -121.9999)
-NWS_GRIDPOINT_URL = "https://api.weather.gov/gridpoints/MTR/100,104"
+# NWS gridpoint cache. Resolved from config.billing.lat/lon on first use,
+# falling back to a Bay Area gridpoint for legacy installs that lack
+# billing config. Override directly by setting config.solar.nws_gridpoint_url
+# (e.g., "https://api.weather.gov/gridpoints/MTR/100,104").
+_DEFAULT_NWS_GRIDPOINT_URL = "https://api.weather.gov/gridpoints/MTR/100,104"
+_resolved_gridpoint_url = None
+
+
+def _nws_gridpoint_url():
+    """Resolve the NWS gridpoint forecast URL.
+
+    Priority: explicit config override → lat/lon-derived (one-time NWS
+    /points lookup, cached) → hardcoded fallback.
+    """
+    global _resolved_gridpoint_url
+    if _resolved_gridpoint_url:
+        return _resolved_gridpoint_url
+    try:
+        from config import get_config
+
+        cfg = get_config()
+        override = cfg.get("solar", {}).get("nws_gridpoint_url")
+        if override:
+            _resolved_gridpoint_url = override
+            return _resolved_gridpoint_url
+        lat = cfg.get("billing", {}).get("lat")
+        lon = cfg.get("billing", {}).get("lon")
+        if lat and lon:
+            points_url = f"https://api.weather.gov/points/{lat},{lon}"
+            ua = _nws_user_agent()
+            result = subprocess.run(
+                ["curl", "-s", "-A", ua, points_url],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            data = json.loads(result.stdout)
+            forecast_url = data.get("properties", {}).get("forecastGridData")
+            if forecast_url:
+                _resolved_gridpoint_url = forecast_url
+                return _resolved_gridpoint_url
+    except Exception as e:
+        print(f"Warning: NWS gridpoint resolution failed ({e}); using fallback")
+    _resolved_gridpoint_url = _DEFAULT_NWS_GRIDPOINT_URL
+    return _resolved_gridpoint_url
+
+
+def _nws_user_agent():
+    """NWS requires a User-Agent with a contact email. Reads from CONTACT_EMAIL
+    env var, falls back to a generic identifier.
+    """
+    import os
+
+    email = (
+        os.environ.get("CONTACT_EMAIL")
+        or os.environ.get("EMAIL_FROM")
+        or "contact@example.com"
+    )
+    return f"EnergyDashboard/1.0 ({email})"
+
 
 # Monthly peak solar production (kWh/day) from Tesla historical data
 # These represent clear-sky potential for a 9.86 kW system in Danville
@@ -34,8 +92,25 @@ MONTHLY_PEAK_SOLAR = {
     12: 16.0,  # December (estimated)
 }
 
-BATTERY_CAPACITY_KWH = 40.5
-BACKUP_RESERVE_PCT = 20  # Always keep 20% for backup
+BATTERY_CAPACITY_KWH = (
+    40.5  # Default fallback; respects config.solar.battery_capacity_kwh
+)
+BACKUP_RESERVE_PCT = 20  # Default fallback; respects config.solar.backup_reserve_pct
+
+
+def _battery_capacity_kwh():
+    """Battery storage capacity (kWh). Reads from config, falls back to 40.5
+    (3× Powerwall 2). Single Powerwall 2 = 13.5 kWh nameplate.
+    """
+    try:
+        from config import get_config
+
+        v = get_config().get("solar", {}).get("battery_capacity_kwh")
+        if v and v > 0:
+            return float(v)
+    except Exception:
+        pass
+    return BATTERY_CAPACITY_KWH
 
 
 def fetch_tomorrow_cloud_cover():
@@ -49,8 +124,8 @@ def fetch_tomorrow_cloud_cover():
             "curl",
             "-s",
             "-A",
-            "EnergyDashboard/1.0 (epheterson@gmail.com)",
-            NWS_GRIDPOINT_URL,
+            _nws_user_agent(),
+            _nws_gridpoint_url(),
         ]
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
         data = json.loads(result.stdout)
@@ -601,11 +676,25 @@ def recommend_charge_cap():
     # similar. (Could be made configurable.)
     max_charge_kw = cfg.get("solar", {}).get("max_charge_kw", 15.0)
     max_discharge_kw = cfg.get("solar", {}).get("max_discharge_kw", 15.0)
+    capacity_kwh = _battery_capacity_kwh()
 
-    # Rate model. Could pull from config TOU rates, but we only use these
-    # for relative cost ranking — exact rates not critical.
-    rates = {"peak": 0.57, "part_peak": 0.49, "off_peak": 0.36}
-    export_credit = 0.14
+    # Pull live TOU rates + export credits from config so the simulator
+    # cost model adapts to whichever utility plan the user has.
+    from config import get_rate
+    from datetime import datetime as _dt
+
+    tomorrow_dt = _dt.now() + timedelta(days=1)
+    rates = {
+        "peak": float(get_rate(tomorrow_dt, "peak")),
+        "part_peak": float(get_rate(tomorrow_dt, "part_peak")),
+        "off_peak": float(get_rate(tomorrow_dt, "off_peak")),
+    }
+    try:
+        from solar_integration import get_export_credit
+
+        export_credit = float(get_export_credit(tomorrow_dt, "off_peak"))
+    except Exception:
+        export_credit = 0.14  # NEM2 + MCE generation rate fallback
     overnight_charge_rate = rates["off_peak"]
 
     prediction = predict_solar_production()
@@ -620,7 +709,7 @@ def recommend_charge_cap():
 
     hourly_solar = _solar_hourly_profile(predicted_solar)
 
-    backup_reserve_kwh = backup_reserve_pct / 100 * BATTERY_CAPACITY_KWH
+    backup_reserve_kwh = backup_reserve_pct / 100 * capacity_kwh
     hard_floor = backup_reserve_pct / 100 + safety_margin
 
     # ── Steady-state per-cap evaluation ──
@@ -635,7 +724,7 @@ def recommend_charge_cap():
             sunrise_soc_pct=sunrise_pct,
             hourly_load=hourly_load,
             hourly_solar=hourly_solar,
-            capacity_kwh=BATTERY_CAPACITY_KWH,
+            capacity_kwh=capacity_kwh,
             max_charge_kw=max_charge_kw,
             max_discharge_kw=max_discharge_kw,
             efficiency=efficiency,
@@ -645,7 +734,7 @@ def recommend_charge_cap():
             # Where battery lands after a full 24h. If above cap, that's
             # the natural sunrise tomorrow (no grid charge). If below, the
             # cap forces grid-charge up to cap.
-            end_pct = sim["end_soc_kwh"] / BATTERY_CAPACITY_KWH * 100
+            end_pct = sim["end_soc_kwh"] / capacity_kwh * 100
             new_sunrise_pct = max(cap_pct * 100, end_pct)
             if abs(new_sunrise_pct - sunrise_pct) < 0.5:
                 sunrise_pct = new_sunrise_pct
@@ -655,7 +744,7 @@ def recommend_charge_cap():
                 sunrise_soc_pct=sunrise_pct,
                 hourly_load=hourly_load,
                 hourly_solar=hourly_solar,
-                capacity_kwh=BATTERY_CAPACITY_KWH,
+                capacity_kwh=capacity_kwh,
                 max_charge_kw=max_charge_kw,
                 max_discharge_kw=max_discharge_kw,
                 efficiency=efficiency,
@@ -669,9 +758,9 @@ def recommend_charge_cap():
         eq_sunrise_pct, sim = _equilibrium(cap_pct)
         # Overnight grid charge needed = max(0, cap - end_soc) when cap forces
         # the floor. In steady state if equilibrium > cap, no grid charge.
-        eq_sunrise_kwh = eq_sunrise_pct / 100 * BATTERY_CAPACITY_KWH
+        eq_sunrise_kwh = eq_sunrise_pct / 100 * capacity_kwh
         overnight_grid_to_battery = (
-            max(0.0, cap_pct * BATTERY_CAPACITY_KWH - sim["end_soc_kwh"]) / efficiency
+            max(0.0, cap_pct * capacity_kwh - sim["end_soc_kwh"]) / efficiency
         )
         daytime_grid_cost = sum(sim["grid_by_tou_kwh"][p] * rates[p] for p in rates)
         overnight_cost = overnight_grid_to_battery * overnight_charge_rate
@@ -719,9 +808,9 @@ def recommend_charge_cap():
     # Legacy fields preserved for backwards compat in HA sensor + audit log
     solar_excess = max(0, predicted_solar - daytime_load)
     battery_in = solar_excess * efficiency
-    target_cap_pct = max(0.0, 1.0 - battery_in / BATTERY_CAPACITY_KWH)
+    target_cap_pct = max(0.0, 1.0 - battery_in / capacity_kwh)
     required_sunrise_kwh = max(0, peak_base_load + backup_reserve_kwh - battery_in)
-    required_sunrise_pct = required_sunrise_kwh / BATTERY_CAPACITY_KWH
+    required_sunrise_pct = required_sunrise_kwh / capacity_kwh
     min_cap_pct = max(hard_floor, required_sunrise_pct)
 
     # SOC trajectory: predict tonight's midnight + natural sunrise SOC from
@@ -736,15 +825,15 @@ def recommend_charge_cap():
     midnight_soc_pct = None
     natural_sunrise_pct = None
     if current_soc_pct is not None:
-        soc_now_kwh = current_soc_pct / 100 * BATTERY_CAPACITY_KWH
+        soc_now_kwh = current_soc_pct / 100 * capacity_kwh
         eve_drain = (overnight_base_load / 12) * hours_to_midnight
         midnight_soc_kwh = max(0, soc_now_kwh - eve_drain)
         sunrise_drain = overnight_base_load * (6 / 12)
         natural_sunrise_kwh = max(0, midnight_soc_kwh - sunrise_drain)
-        midnight_soc_pct = round(midnight_soc_kwh / BATTERY_CAPACITY_KWH * 100, 1)
-        natural_sunrise_pct = round(natural_sunrise_kwh / BATTERY_CAPACITY_KWH * 100, 1)
+        midnight_soc_pct = round(midnight_soc_kwh / capacity_kwh * 100, 1)
+        natural_sunrise_pct = round(natural_sunrise_kwh / capacity_kwh * 100, 1)
 
-    sunset_soc_pct = round(best_sim["sunset_soc_kwh"] / BATTERY_CAPACITY_KWH * 100, 1)
+    sunset_soc_pct = round(best_sim["sunset_soc_kwh"] / capacity_kwh * 100, 1)
     modeled = {
         "current_soc_pct": (
             round(current_soc_pct, 1) if current_soc_pct is not None else None
@@ -802,7 +891,7 @@ def recommend_charge_cap():
         "floor_cap_pct": round(min_cap_pct * 100, 1),
         "reasoning_mode": reason_summary,
         "battery_efficiency": efficiency,
-        "battery_capacity_kwh": BATTERY_CAPACITY_KWH,
+        "battery_capacity_kwh": capacity_kwh,
         "modeled": modeled,
         "reasoning": (
             f"Tomorrow: {prediction['cloud_cover_pct']:.0f}% cloud, "
