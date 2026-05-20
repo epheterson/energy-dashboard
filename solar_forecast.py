@@ -699,6 +699,23 @@ def recommend_charge_cap():
     predicted_export_kwh = best["export_kwh"]
     predicted_overnight_grid_import_kwh = best["overnight_grid_to_battery"]
 
+    # ── EXPERIMENT (2026-05-19): "Let's try just not grid charging for a
+    # few days." Force cap = backup_reserve_pct exactly, so the cap loop
+    # never lifts the Powerwall reserve above its hardware floor. Note this
+    # doesn't stop Tesla's autonomous self-consumption-mode grid topups,
+    # which are independent of our reserve setting.
+    if cfg.get("solar", {}).get("experiment_no_grid_charge"):
+        chosen_cap_pct = backup_reserve_pct / 100.0
+        recommended_cap = int(backup_reserve_pct)
+        # Re-pull the candidate matching this cap (or closest) so downstream
+        # fields (predicted_export, predicted_overnight_grid, sim trace) come
+        # from the actual scenario we're forcing, not the optimizer's pick.
+        match = min(candidates, key=lambda c: abs(c["cap_int"] - recommended_cap))
+        best = match
+        best_sim = match["sim"]
+        predicted_export_kwh = match["export_kwh"]
+        predicted_overnight_grid_import_kwh = match["overnight_grid_to_battery"]
+
     # Legacy fields preserved for backwards compat in HA sensor + audit log
     solar_excess = max(0, predicted_solar - daytime_load)
     battery_in = solar_excess * efficiency
@@ -752,7 +769,13 @@ def recommend_charge_cap():
 
     # Decision reasoning. Cap is always FLOOR — just enough to cover tomorrow's
     # peak from battery. We expose target_cap_pct as informational only.
-    if required_sunrise_pct > hard_floor:
+    if cfg.get("solar", {}).get("experiment_no_grid_charge"):
+        reason_summary = (
+            f"EXPERIMENT no_grid_charge: cap pinned to backup_reserve "
+            f"({backup_reserve_pct}%) — our loop will not grid-charge. "
+            f"Tesla autonomous behavior still possible."
+        )
+    elif required_sunrise_pct > hard_floor:
         reason_summary = (
             f"FLOOR (need {required_sunrise_pct*100:.0f}% at sunrise to cover "
             f"~{peak_base_load:.0f} kWh peak)"
